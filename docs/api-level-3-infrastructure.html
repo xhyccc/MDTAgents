@@ -5,38 +5,283 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>API Level 3 - Infrastructure and Adapters</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
-    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    :root {
+      --blue: #2563eb; --blue-light: #eff6ff; --blue-mid: #bfdbfe;
+      --green: #16a34a; --green-light: #f0fdf4;
+      --purple: #7c3aed; --purple-light: #f5f3ff;
+      --orange: #ea580c; --orange-light: #fff7ed;
+      --gray: #64748b; --gray-light: #f8fafc; --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+           margin: 0; padding: 2rem; line-height: 1.6; max-width: 1060px;
+           background: #fff; color: #1e293b; }
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.3rem; margin-top: 2rem; border-bottom: 2px solid var(--border); padding-bottom: 0.3rem; }
+    h3 { font-size: 1rem; margin: 1rem 0 0.4rem; }
+    a  { color: var(--blue); }
+    code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;
+           font-size: 0.88em; font-family: "SFMono-Regular", Consolas, monospace; }
+    pre  { background: #0f172a; color: #e2e8f0; padding: 1.2rem; border-radius: 8px;
+           overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }
+    pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+    .card { border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin: 1rem 0;
+            background: var(--gray-light); }
+    table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+    th { background: var(--blue); color: #fff; padding: 0.5rem 0.8rem; text-align: left; font-size: 0.9rem; }
+    td { padding: 0.45rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; vertical-align: top; }
+    tr:nth-child(even) td { background: var(--gray-light); }
+    tr:last-child td { border-bottom: none; }
+
+    /* ── File bus tree ── */
+    .tree { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.87rem;
+            line-height: 1.8; background: #0f172a; color: #cbd5e1;
+            padding: 1.2rem 1.4rem; border-radius: 8px; overflow-x: auto; }
+    .tree .dir  { color: #93c5fd; font-weight: 600; }
+    .tree .file { color: #e2e8f0; }
+    .tree .note { color: #94a3b8; font-style: italic; }
+
+    /* ── Data model boxes ── */
+    .model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    .model-box { border: 1.5px solid var(--blue-mid); background: var(--blue-light);
+                 border-radius: 8px; padding: 0.8rem 1rem; font-size: 0.85rem; }
+    .model-box h4 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--blue); }
+    .field { display: flex; gap: 0.5rem; margin: 0.2rem 0; }
+    .field-name  { font-weight: 600; min-width: 100px; color: #1e40af; }
+    .field-type  { color: #7c3aed; }
+    .field-desc  { color: var(--gray); font-size: 0.82rem; }
+
+    /* ── CLI call diagram ── */
+    .cli-flow { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+                margin: 1rem 0; font-size: 0.88rem; }
+    .cli-box { padding: 0.5rem 0.9rem; border-radius: 8px; text-align: center; }
+    .cli-py  { background: var(--blue-light);   border: 1.5px solid var(--blue-mid); }
+    .cli-sp  { background: var(--orange-light);  border: 1.5px solid #fed7aa; }
+    .cli-sub { background: var(--green-light);   border: 1.5px solid #86efac; }
+    .cli-out { background: var(--purple-light);  border: 1.5px solid #c4b5fd; }
+    .cli-arrow { color: var(--gray); font-size: 1.2rem; }
   </style>
 </head>
 <body>
-  <h1>API Level 3: Infrastructure & Adapters</h1>
   <p><a href="./index.html">← Back to overview</a></p>
+  <h1>API Level 3: Infrastructure &amp; Adapters</h1>
+  <p>Three modules form the infrastructure layer: <code>scanner.py</code> extracts text from files,
+     <code>file_bus.py</code> manages the workspace as an inter-agent message bus, and
+     <code>cli_client.py</code> wraps the OpenCode CLI subprocess.</p>
 
-  <h2>Scanner API (<code>src/scanner.py</code>)</h2>
-  <ul>
-    <li><code>Scanner.scan(case_dir)</code> returns a <code>Manifest</code></li>
-    <li>Supports <code>.md .txt .json .csv .pdf .docx .xlsx</code></li>
-    <li>Excludes <code>.mdt_workspace</code> from scanning</li>
-  </ul>
+  <!-- ── Scanner ── -->
+  <h2>Scanner (<code>src/scanner.py</code>)</h2>
+  <p>Recursively scans a case directory and returns a <code>Manifest</code> containing a text preview and metadata for every supported file. <strong>No medical keywords or type detection</strong> — all classification is left to the Coordinator Agent.</p>
 
-  <h2>File Bus API (<code>src/file_bus.py</code>)</h2>
-  <ul>
-    <li>Creates workspace structure (<code>init_workspace()</code>)</li>
-    <li>Typed save/load methods for manifest/index/dispatch/opinions/report</li>
-    <li>Acts as inter-agent file message bus</li>
-  </ul>
+  <h3>API</h3>
+  <pre><code class="language-python">from pathlib import Path
+from src.scanner import Scanner
 
-  <h2>OpenCode Adapter API (<code>src/cli_client.py</code>)</h2>
-  <ul>
-    <li><code>OpenCodeClient.run(...)</code> wraps <code>opencode run</code></li>
-    <li>Handles timeouts, missing CLI errors, and non-zero exits</li>
-    <li>Writes per-agent error logs into workspace <code>errors/</code></li>
-  </ul>
+scanner = Scanner()
+manifest = scanner.scan(Path("cases/demo_case"))
 
-  <h2>Configuration Surface</h2>
-  <ul>
-    <li><code>config/system.yaml</code> controls model, timeout, max concurrency, specialist registry, and workflow flags.</li>
-  </ul>
+print(manifest.total_files)       # → 4
+print(manifest.files[0].path)     # → "CT检查.md"
+print(manifest.files[0].preview)  # → first 800 chars of the file
+print(manifest.files[0].checksum) # → MD5 hex digest</code></pre>
+
+  <h3>Data Models</h3>
+  <div class="model-grid">
+    <div class="model-box">
+      <h4>FileEntry (dataclass)</h4>
+      <div class="field"><span class="field-name">path</span> <span class="field-type">str</span> <span class="field-desc">relative path from case_dir</span></div>
+      <div class="field"><span class="field-name">size</span> <span class="field-type">int</span> <span class="field-desc">file size in bytes</span></div>
+      <div class="field"><span class="field-name">mime_type</span> <span class="field-type">str</span> <span class="field-desc">guessed MIME type</span></div>
+      <div class="field"><span class="field-name">preview</span> <span class="field-type">str</span> <span class="field-desc">first 800 chars of text content</span></div>
+      <div class="field"><span class="field-name">checksum</span> <span class="field-type">str</span> <span class="field-desc">MD5 hex digest</span></div>
+    </div>
+    <div class="model-box">
+      <h4>Manifest (dataclass)</h4>
+      <div class="field"><span class="field-name">case_id</span> <span class="field-type">str</span> <span class="field-desc">name of case folder</span></div>
+      <div class="field"><span class="field-name">files</span> <span class="field-type">List[FileEntry]</span> <span class="field-desc">all scanned files</span></div>
+      <div class="field"><span class="field-name">total_files</span> <span class="field-type">int</span> <span class="field-desc">count of files</span></div>
+      <div class="field"><span class="field-name">timestamp</span> <span class="field-type">str</span> <span class="field-desc">ISO 8601 UTC scan time</span></div>
+    </div>
+  </div>
+
+  <h3>Example <code>00_manifest.json</code></h3>
+  <pre><code class="language-json">{
+  "case_id": "demo_case",
+  "total_files": 4,
+  "timestamp": "2025-01-15T08:30:00+00:00",
+  "files": [
+    {
+      "path": "CT检查.md",
+      "size": 1842,
+      "mime_type": "text/markdown",
+      "preview": "# CT检查报告\n\n## 检查项目\n腹部CT平扫+增强\n\n## 检查所见\n...",
+      "checksum": "a3f1b8c92d4e5f67890abcdef1234567"
+    },
+    {
+      "path": "病理报告.md",
+      "size": 2103,
+      "mime_type": "text/markdown",
+      "preview": "# 病理报告\n\n穿刺部位：肝右叶...",
+      "checksum": "b7c3d9e01f2a3b45678901abcdef2345"
+    }
+  ]
+}</code></pre>
+
+  <h3>Supported File Formats</h3>
+  <table>
+    <thead><tr><th>Extension</th><th>Extractor</th><th>Dependency</th></tr></thead>
+    <tbody>
+      <tr><td><code>.md</code>, <code>.txt</code>, <code>.json</code>, <code>.csv</code></td><td>Direct UTF-8 read</td><td><em>none</em></td></tr>
+      <tr><td><code>.pdf</code></td><td><code>pdfplumber</code> (text layer only, no OCR)</td><td><code>pip install pdfplumber</code></td></tr>
+      <tr><td><code>.docx</code></td><td><code>python-docx</code> paragraph extraction</td><td><code>pip install python-docx</code></td></tr>
+      <tr><td><code>.xlsx</code></td><td><code>openpyxl</code> → tab-separated text table</td><td><code>pip install openpyxl</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Adding a New Format</h3>
+  <pre><code class="language-python"># src/scanner.py — add a new entry to _SUFFIX_EXTRACTORS
+
+def _extract_text_html(path: Path) -> str:
+    from html.parser import HTMLParser
+    # ... strip tags ...
+
+_SUFFIX_EXTRACTORS = {
+    # existing entries ...
+    ".html": _extract_text_html,   # ← add here
+}</code></pre>
+
+  <!-- ── File Bus ── -->
+  <h2>File Bus (<code>src/file_bus.py</code>)</h2>
+  <p>
+    <code>FileBus</code> is the <strong>inter-agent message bus</strong>. All communication between the
+    Coordinator, specialist agents, and the Python orchestrator happens by writing and reading files
+    under <code>.mdt_workspace/</code>. Python never parses medical content.
+  </p>
+
+  <h3>Workspace Directory Layout</h3>
+  <div class="tree">
+<span class="dir">cases/demo_case/.mdt_workspace/</span>
+├── <span class="file">00_manifest.json</span>   <span class="note">← FileBus.save_manifest() / load_manifest()</span>
+├── <span class="file">01_index.json</span>      <span class="note">← FileBus.save_index() / load_index()</span>
+├── <span class="file">02_dispatch.json</span>   <span class="note">← FileBus.save_dispatch() / load_dispatch()</span>
+├── <span class="dir">03_opinions/</span>
+│   ├── <span class="file">影像科.md</span>        <span class="note">← FileBus.save_opinion("影像科", text)</span>
+│   └── <span class="file">...</span>             <span class="note">← FileBus.load_opinions() → dict</span>
+├── <span class="file">04_debate.json</span>     <span class="note">← FileBus.save_debate() (optional)</span>
+├── <span class="file">05_mdt_report.md</span>   <span class="note">← FileBus.save_report()</span>
+└── <span class="dir">errors/</span>
+    └── <span class="file">{agent}.log</span>      <span class="note">← OpenCodeClient._write_error()</span>
+  </div>
+
+  <h3>API Reference</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>init_workspace()</code></td><td>Creates workspace, opinions, and errors directories (idempotent)</td></tr>
+      <tr><td><code>save_manifest(manifest)</code></td><td>Serialise and write <code>Manifest</code> as JSON</td></tr>
+      <tr><td><code>save_index(index)</code></td><td>Write index dict as <code>01_index.json</code></td></tr>
+      <tr><td><code>save_dispatch(dispatch)</code></td><td>Write dispatch dict as <code>02_dispatch.json</code></td></tr>
+      <tr><td><code>save_opinion(name, text)</code></td><td>Write <code>03_opinions/{name}.md</code></td></tr>
+      <tr><td><code>save_report(text)</code></td><td>Write <code>05_mdt_report.md</code></td></tr>
+      <tr><td><code>load_opinions()</code></td><td>Returns <code>{name: text}</code> for all <code>*.md</code> files in <code>03_opinions/</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Usage Example</h3>
+  <pre><code class="language-python">from pathlib import Path
+from src.file_bus import FileBus
+
+bus = FileBus(Path("cases/demo_case"))
+bus.init_workspace()
+
+# Write intermediate results
+bus.save_manifest(manifest)
+bus.save_index(index_dict)
+bus.save_dispatch(dispatch_dict)
+bus.save_opinion("影像科", "# 影像科会诊意见\n...")
+
+# Read all specialist opinions
+opinions = bus.load_opinions()
+# → {"影像科": "# 影像科...", "病理科": "# 病理科..."}
+
+print(bus.report_path)   # → .mdt_workspace/05_mdt_report.md
+print(bus.workspace_dir) # → .mdt_workspace/</code></pre>
+
+  <!-- ── OpenCode Adapter ── -->
+  <h2>OpenCode Adapter (<code>src/cli_client.py</code>)</h2>
+  <p>
+    <code>OpenCodeClient</code> wraps every LLM Agent invocation as an <code>opencode run</code>
+    subprocess call. The system prompt is written to a temporary file (to avoid shell length limits),
+    the user message and optional file attachments are passed as flags, and stdout is returned as the
+    Agent's response.
+  </p>
+
+  <h3>CLI Call Flow</h3>
+  <div class="cli-flow">
+    <div class="cli-box cli-py">Python caller<br><small>(Coordinator / SpecialistPool)</small></div>
+    <div class="cli-arrow">→</div>
+    <div class="cli-box cli-sp"><code>client.run(…)</code><br><small>write system prompt<br>to temp file</small></div>
+    <div class="cli-arrow">→</div>
+    <div class="cli-box cli-sub"><code>opencode run<br>--model …<br>--system-prompt …<br>--message …<br>--file …</code></div>
+    <div class="cli-arrow">→</div>
+    <div class="cli-box cli-out">stdout<br><small>(Agent response text)</small></div>
+  </div>
+
+  <h3>Generated Shell Command (example)</h3>
+  <pre><code class="language-bash">opencode run \
+  --model claude-sonnet-4 \
+  --system-prompt /tmp/tmpabc123.md \
+  --message "你是影像科专家。请阅读下方病例资料…" \
+  --file cases/demo_case/CT检查.md</code></pre>
+
+  <h3>API</h3>
+  <pre><code class="language-python">from pathlib import Path
+from src.cli_client import OpenCodeClient, AgentError
+
+client = OpenCodeClient(
+    error_log_dir=Path(".mdt_workspace/errors"),
+    default_model="claude-sonnet-4",
+)
+
+try:
+    response: str = client.run(
+        agent_name="coordinator_index",
+        system_prompt="You are the MDT coordinator …",
+        user_message="Classify these files: …",
+        file_paths=[Path("cases/demo_case/CT检查.md")],
+        model="claude-sonnet-4",
+        timeout=300,
+    )
+except AgentError as e:
+    # Error already written to .mdt_workspace/errors/coordinator_index.log
+    print(f"Agent failed: {e}")</code></pre>
+
+  <h3>Error Handling</h3>
+  <table>
+    <thead><tr><th>Condition</th><th>Exception</th><th>Side effect</th></tr></thead>
+    <tbody>
+      <tr><td>Process exceeds <code>timeout</code></td><td><code>AgentError</code></td><td>Writes <code>errors/{agent}.log</code></td></tr>
+      <tr><td><code>opencode</code> not on PATH</td><td><code>AgentError</code></td><td>Writes <code>errors/{agent}.log</code></td></tr>
+      <tr><td>Non-zero exit code</td><td><code>AgentError</code></td><td>Writes stderr to <code>errors/{agent}.log</code></td></tr>
+      <tr><td>Specialist fails</td><td>Caught in pool, logged</td><td>Other specialists continue unaffected</td></tr>
+      <tr><td>Coordinator fails</td><td>Propagates to <code>main.py</code></td><td>Pipeline terminates</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ── Config ── -->
+  <h2>Configuration Surface (<code>config/system.yaml</code>)</h2>
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>opencode.default_model</code></td><td>string</td><td><code>"claude-sonnet-4"</code></td><td>LLM model for all agents (overridable per specialist)</td></tr>
+      <tr><td><code>opencode.timeout</code></td><td>int</td><td><code>300</code></td><td>Max seconds per agent call before <code>AgentError</code></td></tr>
+      <tr><td><code>opencode.max_workers</code></td><td>int</td><td><code>5</code></td><td>Max parallel specialist threads</td></tr>
+      <tr><td><code>specialists[].name</code></td><td>string</td><td>—</td><td>Must match <code>prompts/specialists/{name}.md</code></td></tr>
+      <tr><td><code>specialists[].model</code></td><td>string</td><td>default_model</td><td>Per-specialist model override</td></tr>
+      <tr><td><code>specialists[].file_categories</code></td><td>list</td><td>—</td><td>Hint to Coordinator for dispatch decisions</td></tr>
+      <tr><td><code>workflow.enable_debate</code></td><td>bool</td><td><code>false</code></td><td>Enable optional Round 4 cross-debate between specialists</td></tr>
+    </tbody>
+  </table>
+
 </body>
 </html>

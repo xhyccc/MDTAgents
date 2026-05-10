@@ -5,60 +5,292 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MDTAgents Repository Guide</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
-    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
-    .nav a { margin-right: 1rem; }
-    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    :root {
+      --blue: #2563eb; --blue-light: #eff6ff; --blue-mid: #bfdbfe;
+      --green: #16a34a; --green-light: #f0fdf4;
+      --purple: #7c3aed; --purple-light: #f5f3ff;
+      --orange: #ea580c; --orange-light: #fff7ed;
+      --gray: #64748b; --gray-light: #f8fafc; --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+           margin: 0; padding: 2rem; line-height: 1.6; max-width: 1060px;
+           background: #fff; color: #1e293b; }
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.3rem; margin-top: 2rem; border-bottom: 2px solid var(--border); padding-bottom: 0.3rem; }
+    h3 { font-size: 1rem; margin: 1rem 0 0.4rem; }
+    code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;
+           font-size: 0.88em; font-family: "SFMono-Regular", Consolas, monospace; }
+    pre  { background: #0f172a; color: #e2e8f0; padding: 1.2rem; border-radius: 8px;
+           overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }
+    pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+    .nav { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.25rem 0; }
+    .nav a { background: var(--blue); color: #fff; padding: 0.4rem 0.9rem;
+             border-radius: 6px; text-decoration: none; font-size: 0.9rem; }
+    .nav a:hover { background: #1d4ed8; }
+    .card { border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin: 1rem 0;
+            background: var(--gray-light); }
+    .badge { display: inline-block; font-size: 0.78rem; font-weight: 600; padding: 0.15rem 0.5rem;
+             border-radius: 999px; margin-right: 0.3rem; }
+    .badge-blue   { background: var(--blue-light);   color: var(--blue); }
+    .badge-green  { background: var(--green-light);  color: var(--green); }
+    .badge-purple { background: var(--purple-light); color: var(--purple); }
+    .badge-orange { background: var(--orange-light); color: var(--orange); }
+
+    /* ── Pipeline diagram ── */
+    .pipeline { display: flex; align-items: center; flex-wrap: wrap; gap: 0; margin: 1.5rem 0; }
+    .pipeline-step {
+      display: flex; flex-direction: column; align-items: center; text-align: center;
+      background: var(--blue-light); border: 2px solid var(--blue-mid);
+      border-radius: 10px; padding: 0.7rem 1rem; min-width: 130px; flex: 1;
+    }
+    .pipeline-step .round { font-size: 0.72rem; font-weight: 700; color: var(--blue);
+                            text-transform: uppercase; letter-spacing: 0.06em; }
+    .pipeline-step .module { font-weight: 700; font-size: 0.95rem; margin: 0.15rem 0; }
+    .pipeline-step .artifact { font-size: 0.78rem; color: var(--gray); }
+    .pipeline-arrow { font-size: 1.4rem; color: var(--gray); padding: 0 0.2rem; flex-shrink: 0; }
+
+    /* ── Directory tree ── */
+    .tree { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.87rem;
+            line-height: 1.8; background: #0f172a; color: #cbd5e1;
+            padding: 1.2rem 1.4rem; border-radius: 8px; overflow-x: auto; }
+    .tree .dir   { color: #93c5fd; font-weight: 600; }
+    .tree .file  { color: #e2e8f0; }
+    .tree .note  { color: #94a3b8; font-style: italic; }
+
+    /* ── Tech table ── */
+    table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+    th { background: var(--blue); color: #fff; padding: 0.5rem 0.8rem; text-align: left; font-size: 0.9rem; }
+    td { padding: 0.45rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    tr:nth-child(even) td { background: var(--gray-light); }
+    tr:last-child td { border-bottom: none; }
+
+    /* ── Layer cards ── */
+    .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 1rem 0; }
+    .layer-card { border-radius: 10px; padding: 1rem 1.1rem; border: 1.5px solid; }
+    .layer-entry  { background: var(--blue-light);   border-color: var(--blue-mid); }
+    .layer-orch   { background: var(--purple-light);  border-color: #c4b5fd; }
+    .layer-infra  { background: var(--green-light);   border-color: #86efac; }
+    .layer-card h3 { margin-top: 0; }
+    .layer-card ul { margin: 0.4rem 0 0; padding-left: 1.2rem; font-size: 0.9rem; }
   </style>
 </head>
 <body>
-  <h1>MDTAgents: Codebase Overview</h1>
-  <p>This project is a Python-based multi-agent MDT (medical team discussion) orchestrator. It scans case files, asks LLM agents to classify and dispatch specialists, runs specialists in parallel, and writes a final report into a workspace folder.</p>
+
+  <h1>🏥 MDTAgents: Codebase Overview</h1>
+  <p>
+    A Python multi-agent <strong>MDT (Multidisciplinary Team) orchestrator</strong> for medical case consultation.
+    Drop any set of patient files into a case folder; AI agents automatically classify the documents,
+    assemble the right specialist team, consult in parallel, and emit a structured final report —
+    all without Python ever parsing medical content.
+  </p>
 
   <div class="nav">
-    <a href="./api-level-1-entry.html">API Level 1 (Entry Interfaces)</a>
-    <a href="./api-level-2-orchestration.html">API Level 2 (Workflow Orchestration)</a>
-    <a href="./api-level-3-infrastructure.html">API Level 3 (Infrastructure)</a>
+    <a href="./api-level-1-entry.html">Level 1 — Entry Interfaces</a>
+    <a href="./api-level-2-orchestration.html">Level 2 — Workflow Orchestration</a>
+    <a href="./api-level-3-infrastructure.html">Level 3 — Infrastructure</a>
   </div>
 
+  <!-- ── Key Technologies ── -->
   <h2>Key Technologies</h2>
-  <ul>
-    <li><strong>Language:</strong> Python 3.10+</li>
-    <li><strong>LLM Runtime:</strong> OpenCode CLI (<code>opencode run</code>)</li>
-    <li><strong>UI:</strong> Streamlit (<code>app.py</code>)</li>
-    <li><strong>Config:</strong> YAML (<code>config/system.yaml</code>)</li>
-    <li><strong>Testing:</strong> Pytest (unit + integration)</li>
-    <li><strong>File parsing:</strong> <code>pdfplumber</code>, <code>python-docx</code>, <code>openpyxl</code></li>
-  </ul>
+  <table>
+    <thead><tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge badge-blue">Runtime</span></td><td><code>Python 3.10+</code></td><td>Core orchestration logic</td></tr>
+      <tr><td><span class="badge badge-orange">LLM</span></td><td><code>OpenCode CLI</code> (<code>opencode run</code>)</td><td>All Agent invocations — classification, dispatch, specialist consultation, synthesis</td></tr>
+      <tr><td><span class="badge badge-blue">UI</span></td><td>Streamlit (<code>app.py</code>)</td><td>Web interface: run MDT, debug workspace, manage config</td></tr>
+      <tr><td><span class="badge badge-green">Config</span></td><td>YAML (<code>config/system.yaml</code>)</td><td>Model, timeout, max concurrency, specialist registry</td></tr>
+      <tr><td><span class="badge badge-purple">Parallelism</span></td><td><code>ThreadPoolExecutor</code></td><td>Run up to N specialists concurrently (default 5)</td></tr>
+      <tr><td><span class="badge badge-green">Parsing</span></td><td><code>pdfplumber</code>, <code>python-docx</code>, <code>openpyxl</code></td><td>Extract text from PDF / DOCX / XLSX case files</td></tr>
+      <tr><td><span class="badge badge-blue">Testing</span></td><td>Pytest</td><td>Unit + integration tests (<code>make test</code>)</td></tr>
+    </tbody>
+  </table>
 
-  <h2>Top-Level Structure</h2>
-  <div class="card">
-    <ul>
-      <li><code>src/</code>: Core pipeline modules (scanner, coordinator, specialist pool, file bus, CLI client, entry point)</li>
-      <li><code>prompts/</code>: Coordinator and specialist prompt templates</li>
-      <li><code>config/system.yaml</code>: Runtime/model/concurrency/specialist registry configuration</li>
-      <li><code>cases/</code>: Input case folders (sample provided in <code>cases/demo_case</code>)</li>
-      <li><code>tests/</code>: Unit and integration tests for the workflow</li>
-      <li><code>app.py</code>: Streamlit web interface</li>
-    </ul>
+  <!-- ── Pipeline Diagram ── -->
+  <h2>End-to-End Pipeline</h2>
+  <p>Each run of <code>python -m src.main &lt;case_folder&gt;</code> executes five sequential rounds:</p>
+
+  <div class="pipeline">
+    <div class="pipeline-step">
+      <span class="round">Round 0</span>
+      <span class="module">🔍 Scanner</span>
+      <span class="artifact">00_manifest.json</span>
+    </div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step">
+      <span class="round">Round 1</span>
+      <span class="module">🗂 Coordinator<br><small>Index</small></span>
+      <span class="artifact">01_index.json</span>
+    </div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step">
+      <span class="round">Round 2</span>
+      <span class="module">📋 Coordinator<br><small>Dispatch</small></span>
+      <span class="artifact">02_dispatch.json</span>
+    </div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step" style="background:#f0fdf4; border-color:#86efac;">
+      <span class="round" style="color:#16a34a;">Round 3</span>
+      <span class="module">👥 Specialists<br><small>(parallel)</small></span>
+      <span class="artifact">03_opinions/*.md</span>
+    </div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step" style="background:#f5f3ff; border-color:#c4b5fd;">
+      <span class="round" style="color:#7c3aed;">Round 4</span>
+      <span class="module">📝 Coordinator<br><small>Synthesis</small></span>
+      <span class="artifact">05_mdt_report.md</span>
+    </div>
   </div>
 
-  <h2>How Code Is Organized</h2>
-  <ol>
-    <li><strong>Entry layer:</strong> CLI and web UI trigger pipeline execution.</li>
-    <li><strong>Orchestration layer:</strong> Coordinator and specialist pool execute multi-round workflow.</li>
-    <li><strong>Infrastructure layer:</strong> Scanner, file-bus, and OpenCode wrapper handle I/O and execution plumbing.</li>
-  </ol>
+  <!-- ── Directory Structure ── -->
+  <h2>Project Directory Structure</h2>
+  <div class="tree">
+<span class="dir">mdt-orchestrator/</span>
+├── <span class="file">app.py</span>                        <span class="note"># Streamlit web UI (3 tabs)</span>
+├── <span class="file">requirements.txt</span>
+├── <span class="dir">config/</span>
+│   └── <span class="file">system.yaml</span>               <span class="note"># model, timeout, specialist registry</span>
+├── <span class="dir">prompts/</span>
+│   ├── <span class="file">coordinator_index.md</span>      <span class="note"># Round 1 prompt</span>
+│   ├── <span class="file">coordinator_dispatch.md</span>   <span class="note"># Round 2 prompt</span>
+│   ├── <span class="file">coordinator_synthesis.md</span>  <span class="note"># Round 4 prompt</span>
+│   └── <span class="dir">specialists/</span>
+│       ├── <span class="file">base.md</span>               <span class="note"># shared base for all specialists</span>
+│       ├── <span class="file">影像科.md</span>
+│       ├── <span class="file">病理科.md</span>
+│       ├── <span class="file">肿瘤内科.md</span>
+│       ├── <span class="file">外科.md</span>
+│       └── <span class="file">内科.md</span>
+├── <span class="dir">src/</span>
+│   ├── <span class="file">main.py</span>                   <span class="note"># CLI entry point</span>
+│   ├── <span class="file">coordinator.py</span>            <span class="note"># 3-round coordinator engine</span>
+│   ├── <span class="file">specialist_pool.py</span>        <span class="note"># parallel specialist runner</span>
+│   ├── <span class="file">scanner.py</span>                <span class="note"># file scanner → Manifest</span>
+│   ├── <span class="file">file_bus.py</span>               <span class="note"># workspace I/O bus</span>
+│   └── <span class="file">cli_client.py</span>             <span class="note"># opencode CLI wrapper</span>
+├── <span class="dir">cases/</span>
+│   └── <span class="dir">demo_case/</span>                <span class="note"># sample patient case files</span>
+└── <span class="dir">tests/</span>                         <span class="note"># unit + integration tests</span>
+  </div>
 
-  <h2>Pipeline Artifacts</h2>
-  <p>Each case gets a workspace at <code>.mdt_workspace/</code> containing:</p>
-  <ul>
-    <li><code>00_manifest.json</code> (scanner output)</li>
-    <li><code>01_index.json</code> (coordinator round 1)</li>
-    <li><code>02_dispatch.json</code> (coordinator round 2)</li>
-    <li><code>03_opinions/*.md</code> (specialist outputs)</li>
-    <li><code>05_mdt_report.md</code> (final synthesis)</li>
-    <li><code>errors/*.log</code> (agent failures)</li>
-  </ul>
+  <!-- ── Workspace Artifacts ── -->
+  <h2>Workspace Artifacts (per Case)</h2>
+  <p>
+    Every case folder gets a <code>.mdt_workspace/</code> sub-directory automatically.
+    Agents communicate exclusively through these files — Python never parses medical content.
+  </p>
+  <div class="tree">
+<span class="dir">cases/demo_case/.mdt_workspace/</span>
+├── <span class="file">00_manifest.json</span>   <span class="note"># Scanner: file list + text previews + checksums</span>
+├── <span class="file">01_index.json</span>      <span class="note"># Coordinator Round 1: file classification</span>
+├── <span class="file">02_dispatch.json</span>   <span class="note"># Coordinator Round 2: specialist assignments</span>
+├── <span class="dir">03_opinions/</span>
+│   ├── <span class="file">影像科.md</span>        <span class="note"># imaging specialist opinion</span>
+│   ├── <span class="file">病理科.md</span>        <span class="note"># pathology specialist opinion</span>
+│   └── <span class="file">...</span>
+├── <span class="file">04_debate.json</span>     <span class="note"># (optional) cross-debate round</span>
+├── <span class="file">05_mdt_report.md</span>   <span class="note"># final MDT consensus report</span>
+└── <span class="dir">errors/</span>
+    └── <span class="file">{agent}.log</span>      <span class="note"># per-agent error logs</span>
+  </div>
+
+  <!-- ── Code Organization ── -->
+  <h2>Code Organization — Three Layers</h2>
+  <div class="layers">
+    <div class="layer-card layer-entry">
+      <h3>🚪 Layer 1 — Entry</h3>
+      <ul>
+        <li><code>src/main.py</code> — CLI</li>
+        <li><code>app.py</code> — Streamlit web UI</li>
+      </ul>
+      <p style="font-size:0.88rem; margin:0.6rem 0 0;">
+        Accepts a case folder path, wires up all components, and drives the pipeline from start to finish.
+      </p>
+    </div>
+    <div class="layer-card layer-orch">
+      <h3>🔄 Layer 2 — Orchestration</h3>
+      <ul>
+        <li><code>coordinator.py</code> — 3-round engine</li>
+        <li><code>specialist_pool.py</code> — parallel pool</li>
+      </ul>
+      <p style="font-size:0.88rem; margin:0.6rem 0 0;">
+        Coordinator issues LLM Agent calls for index → dispatch → synthesis.
+        Specialist pool runs each specialist in its own thread.
+      </p>
+    </div>
+    <div class="layer-card layer-infra">
+      <h3>🔧 Layer 3 — Infrastructure</h3>
+      <ul>
+        <li><code>scanner.py</code> — file scanner</li>
+        <li><code>file_bus.py</code> — workspace I/O bus</li>
+        <li><code>cli_client.py</code> — OpenCode wrapper</li>
+      </ul>
+      <p style="font-size:0.88rem; margin:0.6rem 0 0;">
+        Handles all I/O: extracting text from files, managing workspace paths, and invoking the OpenCode CLI subprocess.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Quick Start Example ── -->
+  <h2>Quick Start Example</h2>
+
+  <h3>Install &amp; Run (CLI)</h3>
+  <pre><code class="language-bash"># 1. Install Python dependencies
+pip install -r requirements.txt
+
+# 2. Ensure OpenCode CLI is on your PATH
+opencode --version
+
+# 3. Run MDT on the demo case
+python -m src.main cases/demo_case
+
+# 4. Read the final report
+cat cases/demo_case/.mdt_workspace/05_mdt_report.md</code></pre>
+
+  <h3>Expected Console Output</h3>
+  <pre><code>[Main] Scanning case folder: /path/to/cases/demo_case
+[Main] Found 4 file(s). Manifest saved.
+[Coordinator] Round 1: Building file index …
+[Coordinator] Index saved → .mdt_workspace/01_index.json
+[Coordinator] Round 2: Dispatching specialists …
+[Coordinator] Dispatch saved → .mdt_workspace/02_dispatch.json
+[SpecialistPool] 影像科: opinion received ✓
+[SpecialistPool] 病理科: opinion received ✓
+[SpecialistPool] 肿瘤内科: opinion received ✓
+[Coordinator] Round 3: Generating MDT report …
+[Coordinator] Report saved → .mdt_workspace/05_mdt_report.md
+
+✅ MDT 完成。
+   报告：.mdt_workspace/05_mdt_report.md
+   工作区：.mdt_workspace/</code></pre>
+
+  <h3>Run the Web UI</h3>
+  <pre><code class="language-bash">pip install -r requirements-ui.txt
+streamlit run app.py</code></pre>
+  <p>The web UI provides three tabs: <strong>🏥 Run MDT</strong> (upload or select a case, run pipeline, download report),
+     <strong>🔍 Debug</strong> (browse all intermediate workspace JSON/MD files), and
+     <strong>⚙️ Admin</strong> (edit model settings and specialist registry).</p>
+
+  <!-- ── Configuration Example ── -->
+  <h2>Configuration Example (<code>config/system.yaml</code>)</h2>
+  <pre><code class="language-yaml">opencode:
+  default_model: "claude-sonnet-4"   # LLM model used by all agents
+  timeout: 300                        # seconds before an agent call is killed
+  max_workers: 5                      # maximum parallel specialists
+
+specialists:
+  - name: "影像科"                    # must match prompts/specialists/影像科.md
+    model: "claude-sonnet-4"
+    file_categories: ["影像"]
+  - name: "病理科"
+    model: "claude-sonnet-4"
+    file_categories: ["病理"]
+  - name: "肿瘤内科"
+    model: "claude-sonnet-4"
+    file_categories: ["检验", "病历", "既往治疗"]
+
+workflow:
+  enable_debate: false                # set true to enable Round 4 cross-debate</code></pre>
+
 </body>
 </html>

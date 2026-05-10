@@ -5,30 +5,202 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>API Level 1 - Entry Interfaces</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
-    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    :root {
+      --blue: #2563eb; --blue-light: #eff6ff; --blue-mid: #bfdbfe;
+      --green: #16a34a; --green-light: #f0fdf4;
+      --purple: #7c3aed; --purple-light: #f5f3ff;
+      --gray: #64748b; --gray-light: #f8fafc; --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+           margin: 0; padding: 2rem; line-height: 1.6; max-width: 1060px;
+           background: #fff; color: #1e293b; }
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.3rem; margin-top: 2rem; border-bottom: 2px solid var(--border); padding-bottom: 0.3rem; }
+    h3 { font-size: 1rem; margin: 1rem 0 0.4rem; }
+    a  { color: var(--blue); }
+    code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;
+           font-size: 0.88em; font-family: "SFMono-Regular", Consolas, monospace; }
+    pre  { background: #0f172a; color: #e2e8f0; padding: 1.2rem; border-radius: 8px;
+           overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }
+    pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+    .card { border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin: 1rem 0;
+            background: var(--gray-light); }
+    table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+    th { background: var(--blue); color: #fff; padding: 0.5rem 0.8rem; text-align: left; font-size: 0.9rem; }
+    td { padding: 0.45rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    tr:nth-child(even) td { background: var(--gray-light); }
+    tr:last-child td { border-bottom: none; }
+
+    /* ── Flow diagram ── */
+    .flow { display: flex; align-items: stretch; gap: 0; margin: 1.5rem 0; flex-wrap: wrap; }
+    .flow-box {
+      flex: 1; min-width: 140px; border-radius: 8px; padding: 0.8rem 0.9rem;
+      text-align: center; font-size: 0.88rem;
+    }
+    .flow-box strong { display: block; margin-bottom: 0.2rem; font-size: 0.95rem; }
+    .flow-box.input   { background: #fef9c3; border: 2px solid #fde047; }
+    .flow-box.process { background: var(--blue-light); border: 2px solid var(--blue-mid); }
+    .flow-box.output  { background: var(--green-light); border: 2px solid #86efac; }
+    .flow-arrow { display: flex; align-items: center; padding: 0 0.3rem;
+                  font-size: 1.4rem; color: var(--gray); flex-shrink: 0; }
+
+    /* ── UI mockup ── */
+    .ui-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 0; }
+    .ui-tab  { padding: 0.5rem 1.1rem; font-size: 0.9rem; cursor: pointer;
+               border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; }
+    .ui-tab.active { background: var(--blue); color: #fff; border-color: var(--blue-mid); }
+    .ui-tab.idle   { background: var(--gray-light); color: var(--gray); border-color: var(--border); }
+    .ui-body { border: 1px solid var(--border); border-top: none; padding: 1rem 1.1rem;
+               border-radius: 0 0 8px 8px; background: #fff; font-size: 0.88rem; }
+    .ui-sidebar { float: right; width: 200px; background: #f1f5f9; border: 1px solid var(--border);
+                  border-radius: 8px; padding: 0.7rem 0.9rem; font-size: 0.82rem; margin-left: 1rem; }
+    .clearfix::after { content: ""; display: table; clear: both; }
+    .btn { display: inline-block; background: var(--blue); color: #fff;
+           padding: 0.4rem 1rem; border-radius: 6px; font-size: 0.85rem; }
+    .btn-success { background: var(--green); }
   </style>
 </head>
 <body>
-  <h1>API Level 1: Entry Interfaces</h1>
   <p><a href="./index.html">← Back to overview</a></p>
+  <h1>API Level 1: Entry Interfaces</h1>
+  <p>There are two ways to trigger the MDT pipeline: a <strong>CLI</strong> and a <strong>Streamlit web UI</strong>.
+     Both delegate all execution to <code>python -m src.main</code>; neither parses medical content.</p>
 
-  <h2>1) CLI Entry</h2>
-  <ul>
-    <li>File: <code>src/main.py</code></li>
-    <li>Command: <code>python -m src.main &lt;case_folder&gt;</code></li>
-    <li>Responsibility: initialize workspace, run scanner, coordinator, specialist pool, and synthesis in order.</li>
-  </ul>
+  <!-- ── CLI Entry ── -->
+  <h2>1 — CLI Entry (<code>src/main.py</code>)</h2>
 
-  <h2>2) Web Entry</h2>
-  <ul>
-    <li>File: <code>app.py</code></li>
-    <li>Command: <code>streamlit run app.py</code></li>
-    <li>Tabs: Run MDT, Debug workspace artifacts, Admin config editor.</li>
-    <li>Responsibility: user interaction only; execution still delegates to <code>python -m src.main</code>.</li>
-  </ul>
+  <h3>Signature</h3>
+  <pre><code>python -m src.main &lt;case_folder&gt;</code></pre>
 
-  <h2>Entry-Level Contract</h2>
-  <p>Input is a case directory path or uploaded files. Output is generated artifacts under that case's <code>.mdt_workspace/</code>.</p>
+  <h3>What it does (step by step)</h3>
+  <div class="card">
+    <ol style="font-size:0.92rem; margin:0; padding-left:1.3rem;">
+      <li>Resolves <code>&lt;case_folder&gt;</code> to an absolute path and validates it exists.</li>
+      <li>Locates <code>config/system.yaml</code> and <code>prompts/</code> relative to the package root.</li>
+      <li><strong>Round 0</strong> — creates <code>.mdt_workspace/</code> via <code>FileBus.init_workspace()</code> and runs <code>Scanner.scan()</code>.</li>
+      <li><strong>Rounds 1–2</strong> — calls <code>Coordinator.run_index()</code> then <code>Coordinator.run_dispatch()</code>.</li>
+      <li><strong>Round 3</strong> — calls <code>SpecialistPool.run_parallel()</code> (threaded).</li>
+      <li><strong>Round 4</strong> — calls <code>Coordinator.run_synthesis()</code>.</li>
+      <li>Prints the report path and workspace path on success.</li>
+    </ol>
+  </div>
+
+  <h3>Complete Example</h3>
+  <pre><code># Run MDT on the bundled demo case
+python -m src.main cases/demo_case
+
+# Run on a custom case folder
+python -m src.main /data/patients/case_001
+
+# After completion, read the report
+cat cases/demo_case/.mdt_workspace/05_mdt_report.md</code></pre>
+
+  <h3>Input / Output Contract</h3>
+  <div class="flow">
+    <div class="flow-box input">
+      <strong>Input</strong>
+      case folder path<br>
+      <code style="font-size:0.78rem;">cases/demo_case/</code>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box process">
+      <strong>main.py</strong>
+      wires components,<br>runs 5-round pipeline
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box output">
+      <strong>Output</strong>
+      workspace artifacts<br>
+      <code style="font-size:0.78rem;">.mdt_workspace/</code>
+    </div>
+  </div>
+
+  <h3>Error Handling</h3>
+  <table>
+    <thead><tr><th>Condition</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td>Missing case folder</td><td>Raises <code>FileNotFoundError</code> immediately</td></tr>
+      <tr><td>OpenCode CLI not on PATH</td><td><code>AgentError</code> — see <code>errors/</code> log</td></tr>
+      <tr><td>Agent timeout</td><td><code>AgentError</code> — individual specialist failure does not stop others</td></tr>
+      <tr><td>Coordinator failure</td><td><code>AgentError</code> propagates up, pipeline terminates</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ── Web Entry ── -->
+  <h2>2 — Web Entry (<code>app.py</code>)</h2>
+
+  <h3>Launch</h3>
+  <pre><code>pip install -r requirements-ui.txt
+streamlit run app.py</code></pre>
+
+  <h3>UI Layout (mockup)</h3>
+  <div style="margin: 1rem 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;">
+    <div style="background: #1e293b; color: #e2e8f0; padding: 0.5rem 1rem; font-size: 0.85rem;">
+      🏥 MDT-Orchestrator &nbsp;|&nbsp; 多学科会诊 AI 平台
+    </div>
+    <div class="clearfix" style="padding: 0.7rem 1rem 0;">
+      <div class="ui-sidebar">
+        <strong>当前配置</strong><br>
+        模型: claude-sonnet-4<br>
+        超时: 300s<br>
+        最大并发: 5<br><br>
+        <span style="color: var(--green);">✅ opencode 已安装</span>
+      </div>
+      <div class="ui-tabs">
+        <div class="ui-tab active">🏥 Run MDT</div>
+        <div class="ui-tab idle">🔍 Debug</div>
+        <div class="ui-tab idle">⚙️ Admin</div>
+      </div>
+      <div class="ui-body">
+        <strong>输入方式:</strong> &nbsp;
+        <label><input type="radio" checked> 📁 选择病例文件夹</label> &nbsp;
+        <label><input type="radio"> 📤 上传病例文件</label><br><br>
+        <em>选择: demo_case — 包含 4 个文件</em><br><br>
+        <span class="btn">▶ 开始会诊</span>
+        &nbsp; <span style="font-size:0.85rem; color:var(--gray);">🗑 清除上次结果</span>
+      </div>
+    </div>
+    <div style="padding: 0.3rem 1rem 0.7rem; font-size:0.82rem; color: var(--gray);">
+      After run: displays progress log, renders final report as markdown, offers ⬇ download button.
+    </div>
+  </div>
+
+  <h3>Three Tabs</h3>
+  <table>
+    <thead><tr><th>Tab</th><th>Purpose</th><th>Key Actions</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>🏥 Run MDT</td>
+        <td>Run the pipeline on a case</td>
+        <td>Select folder from <code>cases/</code> or upload files; click <em>开始会诊</em>; view/download report</td>
+      </tr>
+      <tr>
+        <td>🔍 Debug</td>
+        <td>Browse all workspace intermediate files</td>
+        <td>Expandable panels for each of <code>00_manifest.json</code> … <code>05_mdt_report.md</code> and error logs</td>
+      </tr>
+      <tr>
+        <td>⚙️ Admin</td>
+        <td>Edit model/timeout settings and specialist registry</td>
+        <td>Inline text inputs, add/remove specialists, save to <code>config/system.yaml</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Web-to-CLI Delegation</h3>
+  <pre><code class="language-python"># app.py — how the web UI executes the pipeline
+def _run_mdt_subprocess(case_dir: Path) -> Tuple[int, str, str]:
+    """Run `python -m src.main &lt;case_dir&gt;` synchronously."""
+    result = subprocess.run(
+        [sys.executable, "-m", "src.main", str(case_dir)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(PROJECT_ROOT),
+    )
+    return result.returncode, result.stdout, result.stderr</code></pre>
+  <p>The web UI never touches the pipeline internals directly — it only spawns the CLI subprocess and displays its output.</p>
+
 </body>
 </html>
