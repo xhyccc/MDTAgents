@@ -6,7 +6,7 @@ opencode:
   max_workers: 5  # maximum parallel specialists
 
 # Specialist registry
-# name must match prompts/specialists/{name}.md (after URL-encoding Chinese chars is not needed; filenames match exactly)
+# name must match prompts/specialists/{name}.md exactly (URL-encoding not required for Chinese characters)
 specialists:
   - name: "影像科"
     model: "claude-sonnet-4"

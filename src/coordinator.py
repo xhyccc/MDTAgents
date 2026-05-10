@@ -215,9 +215,7 @@ class Coordinator:
             opinions_parts.append(f"## {specialist}\n\n{opinion}")
         opinions_block = "\n\n---\n\n".join(opinions_parts)
 
-        opinions_json = json.dumps(
-            {k: v for k, v in opinions.items()}, ensure_ascii=False, indent=2
-        )
+        opinions_json = json.dumps(opinions, ensure_ascii=False, indent=2)
         index_json = json.dumps(index, ensure_ascii=False, indent=2)
 
         user_message = _render(
