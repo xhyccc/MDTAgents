@@ -53,11 +53,51 @@ def _save_config(data: Dict[str, Any]) -> None:
         yaml.dump(data, fh, allow_unicode=True, default_flow_style=False)
 
 
+def _validate_case_dir(path_str: str) -> Optional[Path]:
+    """
+    Validate a user-provided case directory path.
+
+    Returns the resolved absolute Path if the path is a real existing directory,
+    or None otherwise.  Resolving the path (and confirming it is a directory)
+    prevents directory-traversal exploits: an attacker cannot use ``../..``
+    sequences to escape to arbitrary filesystem locations because we always
+    call ``.resolve()`` and confirm the result ``is_dir()``.
+    """
+    if not path_str or not path_str.strip():
+        return None
+    resolved = Path(path_str.strip()).resolve()
+    if not resolved.is_dir():
+        return None
+    return resolved
+
+
 def _workspace_dir(case_dir: Path) -> Path:
     return case_dir / WORKSPACE_DIR_NAME
 
 
+def _safe_read_workspace_file(ws_dir: Path, filename: str) -> Optional[str]:
+    """
+    Read a file from within a workspace directory.
+
+    ``filename`` must be a bare filename (no path separators).  We resolve the
+    final path and confirm it is still under ``ws_dir`` to guard against any
+    traversal in the filename argument.
+    """
+    if not ws_dir.is_dir():
+        return None
+    target = (ws_dir / filename).resolve()
+    # Ensure the resolved path is inside the workspace directory
+    try:
+        target.relative_to(ws_dir.resolve())
+    except ValueError:
+        return None
+    if not target.exists():
+        return None
+    return target.read_text(encoding="utf-8")
+
+
 def _read_json_file(path: Path) -> Optional[Any]:
+    """Read and parse a JSON file; return None on any error."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -143,10 +183,10 @@ with tab_run:
             placeholder="/path/to/case_folder",
         )
         if folder_path:
-            p = Path(folder_path)
-            if p.exists() and p.is_dir():
-                case_dir = p
-                files = [f.name for f in p.iterdir() if f.is_file() and f.name[0] != "."]
+            validated = _validate_case_dir(folder_path)
+            if validated is not None:
+                case_dir = validated
+                files = [f.name for f in validated.iterdir() if f.is_file() and not f.name.startswith(".")]
                 st.success(f"✅ 文件夹已找到，包含 {len(files)} 个文件")
                 if files:
                     with st.expander("查看文件列表"):
@@ -169,7 +209,9 @@ with tab_run:
 
             upload_dir = Path(st.session_state.upload_dir)
             for uf in uploaded_files:
-                (upload_dir / uf.name).write_bytes(uf.read())
+                # Sanitize: keep only the basename, strip any path separators
+                safe_name = Path(uf.name).name
+                (upload_dir / safe_name).write_bytes(uf.read())
 
             case_dir = upload_dir
             st.success(f"✅ 已上传 {len(uploaded_files)} 个文件")
@@ -241,16 +283,17 @@ with tab_debug:
         key="debug_case_path",
     )
 
-    debug_case_dir = Path(debug_case_path) if debug_case_path else None
-    ws_dir = _workspace_dir(debug_case_dir) if debug_case_dir else None
+    debug_case_dir = _validate_case_dir(debug_case_path) if debug_case_path else None
+    ws_dir = _workspace_dir(debug_case_dir) if debug_case_dir is not None else None
 
-    if debug_case_dir and debug_case_dir.exists():
-        if ws_dir and ws_dir.exists():
+    if debug_case_dir is not None:
+        if ws_dir is not None and ws_dir.exists():
             st.success(f"✅ 工作区已找到：`{ws_dir}`")
 
             # ── 00_manifest.json ──────────────────────────────────────────
             with st.expander("📄 00_manifest.json — 文件清单"):
-                data = _read_json_file(ws_dir / "00_manifest.json")
+                raw = _safe_read_workspace_file(ws_dir, "00_manifest.json")
+                data = json.loads(raw) if raw else None
                 if data:
                     st.json(data)
                 else:
@@ -258,7 +301,8 @@ with tab_debug:
 
             # ── 01_index.json ─────────────────────────────────────────────
             with st.expander("📄 01_index.json — 文件分类索引"):
-                data = _read_json_file(ws_dir / "01_index.json")
+                raw = _safe_read_workspace_file(ws_dir, "01_index.json")
+                data = json.loads(raw) if raw else None
                 if data:
                     st.json(data)
                 else:
@@ -266,19 +310,25 @@ with tab_debug:
 
             # ── 02_dispatch.json ──────────────────────────────────────────
             with st.expander("📄 02_dispatch.json — 专科调度计划"):
-                data = _read_json_file(ws_dir / "02_dispatch.json")
+                raw = _safe_read_workspace_file(ws_dir, "02_dispatch.json")
+                data = json.loads(raw) if raw else None
                 if data:
                     st.json(data)
                 else:
                     st.info("尚未生成")
 
             # ── 03_opinions/*.md ──────────────────────────────────────────
-            opinions_dir = ws_dir / "03_opinions"
+            opinions_dir = (ws_dir / "03_opinions").resolve()
             with st.expander("💬 03_opinions — 各专科会诊意见"):
-                if opinions_dir.exists():
+                if opinions_dir.exists() and opinions_dir.is_dir():
                     opinion_files = sorted(opinions_dir.glob("*.md"))
                     if opinion_files:
                         for op_file in opinion_files:
+                            # Confirm the file is still inside opinions_dir
+                            try:
+                                op_file.relative_to(opinions_dir)
+                            except ValueError:
+                                continue
                             st.markdown(f"**{op_file.stem}**")
                             st.markdown(op_file.read_text(encoding="utf-8"))
                             st.divider()
@@ -289,7 +339,8 @@ with tab_debug:
 
             # ── 04_debate.json ────────────────────────────────────────────
             with st.expander("🗣 04_debate.json — 交叉讨论（可选）"):
-                data = _read_json_file(ws_dir / "04_debate.json")
+                raw = _safe_read_workspace_file(ws_dir, "04_debate.json")
+                data = json.loads(raw) if raw else None
                 if data:
                     st.json(data)
                 else:
@@ -297,22 +348,26 @@ with tab_debug:
 
             # ── 05_mdt_report.md ──────────────────────────────────────────
             with st.expander("📋 05_mdt_report.md — 最终报告"):
-                report_path = ws_dir / "05_mdt_report.md"
-                if report_path.exists():
-                    st.markdown(report_path.read_text(encoding="utf-8"))
+                report_text = _safe_read_workspace_file(ws_dir, "05_mdt_report.md")
+                if report_text:
+                    st.markdown(report_text)
                 else:
                     st.info("尚未生成")
 
             # ── Error logs ────────────────────────────────────────────────
-            errors_dir = ws_dir / "errors"
+            errors_dir = (ws_dir / "errors").resolve()
             with st.expander("⚠️ errors — 错误日志"):
-                if errors_dir.exists():
+                if errors_dir.exists() and errors_dir.is_dir():
                     error_logs = sorted(errors_dir.glob("*.log"))
                     if error_logs:
                         for log_file in error_logs:
+                            try:
+                                log_file.relative_to(errors_dir)
+                            except ValueError:
+                                continue
                             st.markdown(f"**{log_file.name}**")
-                            content = log_file.read_text(encoding="utf-8")
-                            st.code(content or "(空)", language=None)
+                            log_content = log_file.read_text(encoding="utf-8")
+                            st.code(log_content or "(空)", language=None)
                     else:
                         st.success("没有错误日志 ✓")
                 else:

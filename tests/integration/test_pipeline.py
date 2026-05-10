@@ -111,7 +111,7 @@ def project_root(tmp_path: Path) -> Path:
     spec_dir = prompts_dir / "specialists"
     spec_dir.mkdir()
     (spec_dir / "base.md").write_text("You are a specialist.", encoding="utf-8")
-    (spec_dir / "影像科.md").write_text("You are an radiologist.", encoding="utf-8")
+    (spec_dir / "影像科.md").write_text("You are a radiologist.", encoding="utf-8")
     (spec_dir / "病理科.md").write_text("You are a pathologist.", encoding="utf-8")
 
     # cases/demo_case/
