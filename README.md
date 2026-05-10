@@ -9,9 +9,13 @@
 ## 项目结构
 
 ```
-mdt-orchestrator/
+MDTAgents/
 ├── README.md
-├── requirements.txt
+├── Makefile                     # 常用操作快捷命令
+├── app.py                       # Streamlit Web UI 入口
+├── requirements.txt             # 核心依赖
+├── requirements-dev.txt         # 测试依赖（pytest）
+├── requirements-ui.txt          # Web UI 依赖（streamlit）
 ├── config/
 │   └── system.yaml              # 系统配置（模型、并发数、专科注册表）
 ├── prompts/
@@ -20,11 +24,13 @@ mdt-orchestrator/
 │   ├── coordinator_synthesis.md # Coordinator Round 3：汇总与最终报告
 │   └── specialists/
 │       ├── base.md              # 所有专科通用底座 Prompt
-│       ├── 影像科.md
-│       ├── 病理科.md
-│       ├── 肿瘤内科.md
-│       ├── 外科.md
-│       └── 内科.md
+│       ├── 影像科.md  (radiologist.md)
+│       ├── 病理科.md  (pathologist.md)
+│       ├── 肿瘤内科.md (oncologist.md)
+│       ├── 外科.md   (surgeon.md)
+│       └── 内科.md   (internist.md)
+├── scripts/
+│   └── setup.sh                 # 一键安装脚本（含 opencode CLI）
 ├── src/
 │   ├── __init__.py
 │   ├── scanner.py               # 纯文件扫描，零业务逻辑
@@ -33,6 +39,9 @@ mdt-orchestrator/
 │   ├── coordinator.py           # 三轮协调器引擎
 │   ├── specialist_pool.py       # 专科 Agent 并行池
 │   └── main.py                  # 入口脚本
+├── tests/
+│   ├── unit/                    # 单元测试
+│   └── integration/             # 集成测试
 └── cases/
     └── demo_case/               # 示例病例
         ├── 入院记录.md
@@ -73,10 +82,27 @@ Agent 间通信完全通过读写 `.mdt_workspace/` 下的文件完成，Python 
 - Python 3.10+
 - [OpenCode CLI](https://opencode.ai/) 已安装并可在 PATH 中访问（`opencode --version`）
 
-### 安装依赖
+### 一键安装（推荐）
 
 ```bash
+# 安装核心依赖 + opencode CLI
+bash scripts/setup.sh
+
+# 同时安装 Streamlit Web UI 依赖
+bash scripts/setup.sh --with-ui
+```
+
+### 手动安装
+
+```bash
+# 核心依赖
 pip install -r requirements.txt
+
+# 开发 / 测试依赖（pytest）
+pip install -r requirements-dev.txt
+
+# Web UI 依赖（Streamlit）
+pip install -r requirements-ui.txt
 ```
 
 `requirements.txt` 包含：
@@ -92,6 +118,8 @@ pip install -r requirements.txt
 
 ## 快速开始
 
+### 命令行
+
 ```bash
 # 对示例病例运行 MDT
 python -m src.main cases/demo_case
@@ -105,6 +133,40 @@ python -m src.main /path/to/your/case_folder
 ```bash
 cat cases/demo_case/.mdt_workspace/05_mdt_report.md
 ```
+
+### Make 快捷命令
+
+```bash
+make install        # 安装核心依赖
+make install-dev    # 安装核心 + 测试依赖
+make install-ui     # 安装核心 + Web UI 依赖
+make setup          # 一键安装脚本（含 opencode）
+make setup-ui       # 一键安装脚本（含 opencode 和 UI）
+
+make run            # 对 cases/demo_case 运行 MDT
+make run CASE=cases/my_case   # 对指定病例运行 MDT
+make ui             # 启动 Streamlit Web UI
+
+make test           # 运行全部测试（单元 + 集成）
+make test-unit      # 仅运行单元测试
+make test-int       # 仅运行集成测试
+make lint           # Python 语法检查
+```
+
+### Web UI（Streamlit）
+
+```bash
+# 启动 Web 界面
+streamlit run app.py
+# 或
+make ui
+```
+
+Web UI 提供三个功能页签：
+
+- **🏥 Run MDT** — 选择或上传病例文件夹、执行会诊、下载最终报告
+- **🔍 Debug** — 浏览工作区中间文件（manifest、index、dispatch、各专科意见）
+- **⚙️ Admin** — 查看/编辑系统配置、管理专科注册表
 
 ---
 
