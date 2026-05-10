@@ -1,0 +1,38 @@
+# MDT-Orchestrator System Configuration
+
+opencode:
+  default_model: "claude-sonnet-4"
+  timeout: 300
+  max_workers: 5  # maximum parallel specialists
+
+# Specialist registry
+# name must match prompts/specialists/{name}.md (after URL-encoding Chinese chars is not needed; filenames match exactly)
+specialists:
+  - name: "影像科"
+    model: "claude-sonnet-4"
+    file_categories: ["影像"]
+  - name: "病理科"
+    model: "claude-sonnet-4"
+    file_categories: ["病理"]
+  - name: "肿瘤内科"
+    model: "claude-sonnet-4"
+    file_categories: ["检验", "病历", "既往治疗"]
+  - name: "外科"
+    model: "claude-sonnet-4"
+    file_categories: ["影像", "病理", "检验"]
+  - name: "内科"
+    model: "claude-sonnet-4"
+    file_categories: ["检验", "病历"]
+
+workflow:
+  rounds:
+    - index
+    - dispatch
+    - parallel_consult
+    - synthesis
+  enable_debate: false  # set to true to enable cross-debate round (Round 4)
+
+paths:
+  prompts_dir: "prompts"
+  cases_dir: "cases"
+  workspace_name: ".mdt_workspace"

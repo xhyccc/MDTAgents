@@ -1,0 +1,17 @@
+# MDT workspace directories (generated at runtime)
+.mdt_workspace/
+cases/**/.mdt_workspace/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Editor
+.DS_Store
+*.swp
