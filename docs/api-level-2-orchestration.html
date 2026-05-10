@@ -5,35 +5,261 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>API Level 2 - Workflow Orchestration</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
-    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    :root {
+      --blue: #2563eb; --blue-light: #eff6ff; --blue-mid: #bfdbfe;
+      --green: #16a34a; --green-light: #f0fdf4;
+      --purple: #7c3aed; --purple-light: #f5f3ff;
+      --orange: #ea580c; --orange-light: #fff7ed;
+      --gray: #64748b; --gray-light: #f8fafc; --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+           margin: 0; padding: 2rem; line-height: 1.6; max-width: 1060px;
+           background: #fff; color: #1e293b; }
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.3rem; margin-top: 2rem; border-bottom: 2px solid var(--border); padding-bottom: 0.3rem; }
+    h3 { font-size: 1rem; margin: 1rem 0 0.4rem; }
+    a  { color: var(--blue); }
+    code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;
+           font-size: 0.88em; font-family: "SFMono-Regular", Consolas, monospace; }
+    pre  { background: #0f172a; color: #e2e8f0; padding: 1.2rem; border-radius: 8px;
+           overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }
+    pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+    .card { border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin: 1rem 0;
+            background: var(--gray-light); }
+    table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+    th { background: var(--blue); color: #fff; padding: 0.5rem 0.8rem; text-align: left; font-size: 0.9rem; }
+    td { padding: 0.45rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; vertical-align: top; }
+    tr:nth-child(even) td { background: var(--gray-light); }
+    tr:last-child td { border-bottom: none; }
+
+    /* ── Coordinator round diagram ── */
+    .rounds { display: flex; flex-direction: column; gap: 0; margin: 1.2rem 0; }
+    .round-row { display: flex; align-items: stretch; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .round-num { width: 80px; flex-shrink: 0; background: var(--blue); color: #fff;
+                 border-radius: 8px; display: flex; align-items: center; justify-content: center;
+                 font-weight: 700; font-size: 0.88rem; text-align: center; padding: 0.5rem; }
+    .round-body { flex: 1; border: 1.5px solid var(--blue-mid); background: var(--blue-light);
+                  border-radius: 8px; padding: 0.6rem 0.9rem; font-size: 0.88rem; }
+    .round-body strong { font-size: 0.95rem; }
+    .round-arrow { display: flex; align-items: center; justify-content: center;
+                   padding-left: 80px; color: var(--gray); font-size: 1.2rem; }
+
+    /* ── Parallel pool diagram ── */
+    .pool { margin: 1.2rem 0; }
+    .pool-dispatch { background: var(--blue-light); border: 2px solid var(--blue-mid);
+                     border-radius: 8px; padding: 0.6rem 1rem; text-align: center;
+                     font-weight: 700; font-size: 0.92rem; }
+    .pool-threads { display: flex; gap: 0.5rem; margin: 0.4rem 0; flex-wrap: wrap; }
+    .pool-thread { flex: 1; min-width: 100px; background: var(--green-light);
+                   border: 2px solid #86efac; border-radius: 8px; padding: 0.5rem 0.5rem;
+                   text-align: center; font-size: 0.82rem; }
+    .pool-thread .thread-label { font-weight: 600; font-size: 0.78rem; color: var(--green); }
+    .pool-merge { background: var(--purple-light); border: 2px solid #c4b5fd;
+                  border-radius: 8px; padding: 0.6rem 1rem; text-align: center;
+                  font-weight: 700; font-size: 0.92rem; margin-top: 0.4rem; }
+    .pool-arrow { text-align: center; color: var(--gray); font-size: 1.2rem; margin: 0.15rem 0; }
   </style>
 </head>
 <body>
-  <h1>API Level 2: Workflow Orchestration</h1>
   <p><a href="./index.html">← Back to overview</a></p>
+  <h1>API Level 2: Workflow Orchestration</h1>
+  <p>Two classes drive the MDT workflow: <code>Coordinator</code> (sequential, 3-round) and <code>SpecialistPool</code> (parallel). Together they implement the complete pipeline from file classification to final report.</p>
 
-  <h2>Coordinator API (<code>src/coordinator.py</code>)</h2>
-  <ul>
-    <li><code>Coordinator.run_index(manifest)</code> → writes <code>01_index.json</code></li>
-    <li><code>Coordinator.run_dispatch(index)</code> → writes <code>02_dispatch.json</code></li>
-    <li><code>Coordinator.run_synthesis(index, opinions)</code> → writes <code>05_mdt_report.md</code></li>
-  </ul>
-  <p>Coordinator is the control-plane agent for classification, specialist dispatch, and final report synthesis.</p>
+  <!-- ── Coordinator ── -->
+  <h2>Coordinator (<code>src/coordinator.py</code>)</h2>
+  <p>The <code>Coordinator</code> is the control-plane agent. It has <strong>three public methods</strong>, one per round. Each method renders a prompt template, calls the LLM via <code>OpenCodeClient</code>, parses the JSON response, and persists the result via <code>FileBus</code>.</p>
 
-  <h2>Specialist Pool API (<code>src/specialist_pool.py</code>)</h2>
-  <ul>
-    <li><code>SpecialistPool.run_parallel(dispatch)</code> → executes specialists in <code>ThreadPoolExecutor</code></li>
-    <li>Consumes <code>specialists_required</code> from dispatch payload</li>
-    <li>Produces specialist opinions and writes <code>03_opinions/*.md</code></li>
-  </ul>
+  <h3>API Summary</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Input</th><th>Output (file)</th><th>Agent role</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>run_index(manifest)</code></td>
+        <td><code>Manifest</code> object</td>
+        <td><code>01_index.json</code></td>
+        <td>Classifies each file into a medical category and assesses completeness</td>
+      </tr>
+      <tr>
+        <td><code>run_dispatch(index)</code></td>
+        <td>index dict</td>
+        <td><code>02_dispatch.json</code></td>
+        <td>Decides which specialist departments are needed and assigns files to each</td>
+      </tr>
+      <tr>
+        <td><code>run_synthesis(index, opinions)</code></td>
+        <td>index dict + opinions dict</td>
+        <td><code>05_mdt_report.md</code></td>
+        <td>Synthesises all specialist opinions into a final MDT consensus report</td>
+      </tr>
+    </tbody>
+  </table>
 
-  <h2>Round Mapping</h2>
-  <ol>
-    <li>Round 1: index</li>
-    <li>Round 2: dispatch</li>
-    <li>Round 3: parallel specialist consultation</li>
-    <li>Round 4: final synthesis</li>
-  </ol>
+  <h3>Three-Round Flow</h3>
+  <div class="rounds">
+    <div class="round-row">
+      <div class="round-num">Round 1<br>Index</div>
+      <div class="round-body">
+        <strong>Coordinator: file classification</strong><br>
+        Reads <code>00_manifest.json</code> → asks agent to label each file (e.g. "影像", "病理", "检验") and flag missing data → writes <code>01_index.json</code>
+      </div>
+    </div>
+    <div class="round-arrow">↓</div>
+    <div class="round-row">
+      <div class="round-num">Round 2<br>Dispatch</div>
+      <div class="round-body">
+        <strong>Coordinator: specialist team assembly</strong><br>
+        Reads <code>01_index.json</code> + available prompt files → asks agent which specialists to involve and which files each should read → writes <code>02_dispatch.json</code>
+      </div>
+    </div>
+    <div class="round-arrow">↓ (after SpecialistPool)</div>
+    <div class="round-row">
+      <div class="round-num">Round 4<br>Synthesis</div>
+      <div class="round-body">
+        <strong>Coordinator: consensus report</strong><br>
+        Reads all <code>03_opinions/*.md</code> → asks agent (as MDT chairperson) to merge findings, identify consensus and disagreements → writes <code>05_mdt_report.md</code>
+      </div>
+    </div>
+  </div>
+
+  <h3>Constructor</h3>
+  <pre><code class="language-python">from pathlib import Path
+from src.file_bus import FileBus
+from src.coordinator import Coordinator
+
+bus = FileBus(Path("cases/demo_case"))
+bus.init_workspace()
+
+coordinator = Coordinator(
+    bus=bus,
+    config_path=Path("config/system.yaml"),
+    prompts_dir=Path("prompts"),
+)
+
+# Round 1
+index = coordinator.run_index(manifest)
+
+# Round 2
+dispatch = coordinator.run_dispatch(index)
+
+# Round 4 (after specialist pool)
+coordinator.run_synthesis(index, opinions)</code></pre>
+
+  <h3>Example: <code>01_index.json</code></h3>
+  <pre><code class="language-json">{
+  "case_id": "demo_case",
+  "files": [
+    { "path": "CT检查.md",   "category": "影像",   "summary": "腹部CT平扫+增强，见肝脏占位" },
+    { "path": "病理报告.md", "category": "病理",   "summary": "穿刺活检，肝细胞癌" },
+    { "path": "血常规.md",   "category": "检验",   "summary": "白细胞略高，血红蛋白正常" },
+    { "path": "入院记录.md", "category": "病历",   "summary": "68岁男性，乙肝病史20年" }
+  ],
+  "completeness": "基本完整，建议补充AFP肿瘤标志物",
+  "missing": ["AFP", "Child-Pugh评分"]
+}</code></pre>
+
+  <h3>Example: <code>02_dispatch.json</code></h3>
+  <pre><code class="language-json">{
+  "specialists_required": [
+    {
+      "name": "影像科",
+      "model": "claude-sonnet-4",
+      "files_assigned": ["CT检查.md"]
+    },
+    {
+      "name": "病理科",
+      "model": "claude-sonnet-4",
+      "files_assigned": ["病理报告.md"]
+    },
+    {
+      "name": "肿瘤内科",
+      "model": "claude-sonnet-4",
+      "files_assigned": ["血常规.md", "入院记录.md"]
+    }
+  ],
+  "rationale": "肝脏占位需影像、病理、肿瘤内科会诊"
+}</code></pre>
+
+  <!-- ── Specialist Pool ── -->
+  <h2>Specialist Pool (<code>src/specialist_pool.py</code>)</h2>
+  <p>
+    <code>SpecialistPool</code> reads <code>specialists_required</code> from the dispatch plan and launches
+    <strong>one OpenCode session per specialist</strong> in a <code>ThreadPoolExecutor</code>.
+    Individual specialist failures are caught and logged without blocking the others.
+  </p>
+
+  <h3>Parallel Execution Diagram</h3>
+  <div class="pool">
+    <div class="pool-dispatch">📋 02_dispatch.json → SpecialistPool.run_parallel()</div>
+    <div class="pool-arrow">↓ ThreadPoolExecutor (max_workers=5)</div>
+    <div class="pool-threads">
+      <div class="pool-thread">
+        <div class="thread-label">Thread 1</div>
+        影像科<br>
+        <small>CT检查.md</small>
+      </div>
+      <div class="pool-thread">
+        <div class="thread-label">Thread 2</div>
+        病理科<br>
+        <small>病理报告.md</small>
+      </div>
+      <div class="pool-thread">
+        <div class="thread-label">Thread 3</div>
+        肿瘤内科<br>
+        <small>血常规.md<br>入院记录.md</small>
+      </div>
+      <div class="pool-thread" style="opacity:0.4;">
+        <div class="thread-label">Thread 4–5</div>
+        (available<br>if dispatched)
+      </div>
+    </div>
+    <div class="pool-arrow">↓ as_completed()</div>
+    <div class="pool-merge">📁 03_opinions/影像科.md, 病理科.md, 肿瘤内科.md</div>
+  </div>
+
+  <h3>API</h3>
+  <pre><code class="language-python">from src.specialist_pool import SpecialistPool
+
+pool = SpecialistPool(bus, config_path=config_path, prompts_dir=prompts_dir)
+
+# Returns {specialist_name: opinion_text} for all completed specialists
+opinions: dict[str, str] = pool.run_parallel(dispatch)</code></pre>
+
+  <h3>Per-Specialist System Prompt Assembly</h3>
+  <pre><code class="language-python"># _build_system_prompt() concatenates two prompt files:
+#   prompts/specialists/base.md        ← shared clinical rules
+#   prompts/specialists/{name}.md      ← specialty-specific instructions
+# Result is joined with "---" separator and sent as the system turn.</code></pre>
+
+  <h3>Example Specialist Opinion (<code>03_opinions/影像科.md</code>)</h3>
+  <pre><code># 影像科会诊意见
+
+## 一、资料概述
+阅读 CT检查.md：腹部CT平扫及增强扫描报告。
+
+## 二、专科分析
+肝右叶见一约 4.2cm × 3.8cm 低密度占位，增强后动脉期明显强化，
+门脉期及延迟期廓清，符合肝细胞癌（HCC）典型影像表现。
+门静脉主干未见明显癌栓。
+
+## 三、初步结论
+影像学表现符合原发性肝细胞癌，BCLC 分期初步为 B 期。
+
+## 四、需要补充的资料
+建议行肝脏 MRI 平扫 + 增强以进一步明确病灶边界。</code></pre>
+
+  <!-- ── Round Mapping ── -->
+  <h2>Complete Round Mapping</h2>
+  <table>
+    <thead><tr><th>Round</th><th>Component</th><th>Input</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td><code>Scanner</code></td><td>case folder files</td><td><code>00_manifest.json</code></td></tr>
+      <tr><td>1</td><td><code>Coordinator.run_index()</code></td><td><code>00_manifest.json</code></td><td><code>01_index.json</code></td></tr>
+      <tr><td>2</td><td><code>Coordinator.run_dispatch()</code></td><td><code>01_index.json</code></td><td><code>02_dispatch.json</code></td></tr>
+      <tr><td>3</td><td><code>SpecialistPool.run_parallel()</code></td><td><code>02_dispatch.json</code> + case files</td><td><code>03_opinions/*.md</code></td></tr>
+      <tr><td>4</td><td><code>Coordinator.run_synthesis()</code></td><td><code>01_index.json</code> + <code>03_opinions/*.md</code></td><td><code>05_mdt_report.md</code></td></tr>
+    </tbody>
+  </table>
+
 </body>
 </html>
