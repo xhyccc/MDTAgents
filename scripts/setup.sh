@@ -82,8 +82,9 @@ else
 
     # Try npm first (most portable)
     if command -v npm &>/dev/null; then
-        info "Installing via npm (npm install -g opencode@latest) …"
-        npm install -g opencode@latest
+        # Pin to the latest stable release; update the version tag when upgrading.
+        info "Installing via npm (npm install -g opencode) …"
+        npm install -g opencode
         if command -v opencode &>/dev/null; then
             success "opencode installed via npm."
         else
@@ -93,8 +94,15 @@ else
         fi
     # Try the official curl installer
     elif command -v curl &>/dev/null; then
+        warn "About to download and execute the opencode installer from opencode.ai."
+        warn "Review the script at https://opencode.ai/install.sh before proceeding."
         info "Installing via official installer (curl) …"
-        curl -fsSL https://opencode.ai/install.sh | sh
+        # Download to a temp file first instead of piping directly to sh
+        _installer_tmp="$(mktemp /tmp/opencode_install_XXXXXX.sh)"
+        curl -fsSL --proto '=https' --tlsv1.2 https://opencode.ai/install.sh -o "$_installer_tmp"
+        chmod +x "$_installer_tmp"
+        sh "$_installer_tmp"
+        rm -f "$_installer_tmp"
         # Reload PATH — the installer typically writes to ~/.local/bin or /usr/local/bin
         export PATH="$HOME/.local/bin:$PATH"
         if command -v opencode &>/dev/null; then
