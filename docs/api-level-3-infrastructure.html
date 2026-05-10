@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Level 3 - Infrastructure and Adapters</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
+    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>API Level 3: Infrastructure & Adapters</h1>
+  <p><a href="./index.html">← Back to overview</a></p>
+
+  <h2>Scanner API (<code>src/scanner.py</code>)</h2>
+  <ul>
+    <li><code>Scanner.scan(case_dir)</code> returns a <code>Manifest</code></li>
+    <li>Supports <code>.md .txt .json .csv .pdf .docx .xlsx</code></li>
+    <li>Excludes <code>.mdt_workspace</code> from scanning</li>
+  </ul>
+
+  <h2>File Bus API (<code>src/file_bus.py</code>)</h2>
+  <ul>
+    <li>Creates workspace structure (<code>init_workspace()</code>)</li>
+    <li>Typed save/load methods for manifest/index/dispatch/opinions/report</li>
+    <li>Acts as inter-agent file message bus</li>
+  </ul>
+
+  <h2>OpenCode Adapter API (<code>src/cli_client.py</code>)</h2>
+  <ul>
+    <li><code>OpenCodeClient.run(...)</code> wraps <code>opencode run</code></li>
+    <li>Handles timeouts, missing CLI errors, and non-zero exits</li>
+    <li>Writes per-agent error logs into workspace <code>errors/</code></li>
+  </ul>
+
+  <h2>Configuration Surface</h2>
+  <ul>
+    <li><code>config/system.yaml</code> controls model, timeout, max concurrency, specialist registry, and workflow flags.</li>
+  </ul>
+</body>
+</html>

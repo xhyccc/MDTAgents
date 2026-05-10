@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Level 2 - Workflow Orchestration</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
+    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>API Level 2: Workflow Orchestration</h1>
+  <p><a href="./index.html">← Back to overview</a></p>
+
+  <h2>Coordinator API (<code>src/coordinator.py</code>)</h2>
+  <ul>
+    <li><code>Coordinator.run_index(manifest)</code> → writes <code>01_index.json</code></li>
+    <li><code>Coordinator.run_dispatch(index)</code> → writes <code>02_dispatch.json</code></li>
+    <li><code>Coordinator.run_synthesis(index, opinions)</code> → writes <code>05_mdt_report.md</code></li>
+  </ul>
+  <p>Coordinator is the control-plane agent for classification, specialist dispatch, and final report synthesis.</p>
+
+  <h2>Specialist Pool API (<code>src/specialist_pool.py</code>)</h2>
+  <ul>
+    <li><code>SpecialistPool.run_parallel(dispatch)</code> → executes specialists in <code>ThreadPoolExecutor</code></li>
+    <li>Consumes <code>specialists_required</code> from dispatch payload</li>
+    <li>Produces specialist opinions and writes <code>03_opinions/*.md</code></li>
+  </ul>
+
+  <h2>Round Mapping</h2>
+  <ol>
+    <li>Round 1: index</li>
+    <li>Round 2: dispatch</li>
+    <li>Round 3: parallel specialist consultation</li>
+    <li>Round 4: final synthesis</li>
+  </ol>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Level 1 - Entry Interfaces</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
+    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>API Level 1: Entry Interfaces</h1>
+  <p><a href="./index.html">← Back to overview</a></p>
+
+  <h2>1) CLI Entry</h2>
+  <ul>
+    <li>File: <code>src/main.py</code></li>
+    <li>Command: <code>python -m src.main &lt;case_folder&gt;</code></li>
+    <li>Responsibility: initialize workspace, run scanner, coordinator, specialist pool, and synthesis in order.</li>
+  </ul>
+
+  <h2>2) Web Entry</h2>
+  <ul>
+    <li>File: <code>app.py</code></li>
+    <li>Command: <code>streamlit run app.py</code></li>
+    <li>Tabs: Run MDT, Debug workspace artifacts, Admin config editor.</li>
+    <li>Responsibility: user interaction only; execution still delegates to <code>python -m src.main</code>.</li>
+  </ul>
+
+  <h2>Entry-Level Contract</h2>
+  <p>Input is a case directory path or uploaded files. Output is generated artifacts under that case's <code>.mdt_workspace/</code>.</p>
+</body>
+</html>

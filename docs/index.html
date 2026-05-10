@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MDTAgents Repository Guide</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 980px; }
+    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    .nav a { margin-right: 1rem; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>MDTAgents: Codebase Overview</h1>
+  <p>This project is a Python-based multi-agent MDT (medical team discussion) orchestrator. It scans case files, asks LLM agents to classify and dispatch specialists, runs specialists in parallel, and writes a final report into a workspace folder.</p>
+
+  <div class="nav">
+    <a href="./api-level-1-entry.html">API Level 1 (Entry Interfaces)</a>
+    <a href="./api-level-2-orchestration.html">API Level 2 (Workflow Orchestration)</a>
+    <a href="./api-level-3-infrastructure.html">API Level 3 (Infrastructure)</a>
+  </div>
+
+  <h2>Key Technologies</h2>
+  <ul>
+    <li><strong>Language:</strong> Python 3.10+</li>
+    <li><strong>LLM Runtime:</strong> OpenCode CLI (<code>opencode run</code>)</li>
+    <li><strong>UI:</strong> Streamlit (<code>app.py</code>)</li>
+    <li><strong>Config:</strong> YAML (<code>config/system.yaml</code>)</li>
+    <li><strong>Testing:</strong> Pytest (unit + integration)</li>
+    <li><strong>File parsing:</strong> <code>pdfplumber</code>, <code>python-docx</code>, <code>openpyxl</code></li>
+  </ul>
+
+  <h2>Top-Level Structure</h2>
+  <div class="card">
+    <ul>
+      <li><code>src/</code>: Core pipeline modules (scanner, coordinator, specialist pool, file bus, CLI client, entry point)</li>
+      <li><code>prompts/</code>: Coordinator and specialist prompt templates</li>
+      <li><code>config/system.yaml</code>: Runtime/model/concurrency/specialist registry configuration</li>
+      <li><code>cases/</code>: Input case folders (sample provided in <code>cases/demo_case</code>)</li>
+      <li><code>tests/</code>: Unit and integration tests for the workflow</li>
+      <li><code>app.py</code>: Streamlit web interface</li>
+    </ul>
+  </div>
+
+  <h2>How Code Is Organized</h2>
+  <ol>
+    <li><strong>Entry layer:</strong> CLI and web UI trigger pipeline execution.</li>
+    <li><strong>Orchestration layer:</strong> Coordinator and specialist pool execute multi-round workflow.</li>
+    <li><strong>Infrastructure layer:</strong> Scanner, file-bus, and OpenCode wrapper handle I/O and execution plumbing.</li>
+  </ol>
+
+  <h2>Pipeline Artifacts</h2>
+  <p>Each case gets a workspace at <code>.mdt_workspace/</code> containing:</p>
+  <ul>
+    <li><code>00_manifest.json</code> (scanner output)</li>
+    <li><code>01_index.json</code> (coordinator round 1)</li>
+    <li><code>02_dispatch.json</code> (coordinator round 2)</li>
+    <li><code>03_opinions/*.md</code> (specialist outputs)</li>
+    <li><code>05_mdt_report.md</code> (final synthesis)</li>
+    <li><code>errors/*.log</code> (agent failures)</li>
+  </ul>
+</body>
+</html>
