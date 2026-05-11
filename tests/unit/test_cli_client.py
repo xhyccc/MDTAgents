@@ -65,6 +65,13 @@ class TestOpenCodeClientSuccess:
         model_idx = cmd.index("--model")
         assert cmd[model_idx + 1] == "test-model"
 
+    def test_run_omits_model_flag_when_no_model_configured(self, tmp_path: Path):
+        client = OpenCodeClient(error_log_dir=tmp_path / "errors")  # default_model=None
+        with patch("subprocess.run", return_value=_make_completed_process()) as mock_run:
+            client.run(agent_name="t", system_prompt="s", user_message="m")
+        cmd = mock_run.call_args[0][0]
+        assert "--model" not in cmd
+
     def test_run_passes_file_flags(self, tmp_path: Path):
         client = _make_client(tmp_path)
         f1 = tmp_path / "a.txt"

@@ -69,7 +69,7 @@ class SpecialistPool:
 
         cfg = _load_config(config_path)
         oc_cfg = cfg.get("opencode", {})
-        self.default_model: str = oc_cfg.get("default_model", "claude-sonnet-4")
+        self.default_model: Optional[str] = oc_cfg.get("default_model") or None
         self.timeout: int = oc_cfg.get("timeout", 300)
         self.max_workers: int = oc_cfg.get("max_workers", 5)
 
@@ -134,7 +134,7 @@ class SpecialistPool:
     def _run_specialist(self, spec: Dict[str, Any]) -> str:
         name: str = spec["name"]
         files_assigned: List[str] = spec.get("files_assigned", [])
-        model: str = spec.get("model", self.default_model)
+        model: Optional[str] = spec.get("model") or self.default_model
 
         system_prompt = self._build_system_prompt(name)
         user_message = self._build_user_message(name, files_assigned)

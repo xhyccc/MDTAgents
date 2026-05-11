@@ -1,7 +1,8 @@
 # MDT-Orchestrator System Configuration
 
 opencode:
-  default_model: "claude-sonnet-4"
+  # default_model: "claude-sonnet-4"   # Uncomment and set to override opencode's built-in default model.
+  #                                     # Leave commented out to use opencode's own default.
   timeout: 300
   max_workers: 5  # maximum parallel specialists
 
@@ -9,19 +10,15 @@ opencode:
 # name must match prompts/specialists/{name}.md exactly (URL-encoding not required for Chinese characters)
 specialists:
   - name: "影像科"
-    model: "claude-sonnet-4"
+    # model: "claude-sonnet-4"   # Uncomment to override the global default for this specialist.
     file_categories: ["影像"]
   - name: "病理科"
-    model: "claude-sonnet-4"
     file_categories: ["病理"]
   - name: "肿瘤内科"
-    model: "claude-sonnet-4"
     file_categories: ["检验", "病历", "既往治疗"]
   - name: "外科"
-    model: "claude-sonnet-4"
     file_categories: ["影像", "病理", "检验"]
   - name: "内科"
-    model: "claude-sonnet-4"
     file_categories: ["检验", "病历"]
 
 workflow:

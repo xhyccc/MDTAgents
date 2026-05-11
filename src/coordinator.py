@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -102,7 +102,7 @@ class Coordinator:
 
         cfg = _load_config(config_path)
         oc_cfg = cfg.get("opencode", {})
-        self.default_model: str = oc_cfg.get("default_model", "claude-sonnet-4")
+        self.default_model: Optional[str] = oc_cfg.get("default_model") or None
         self.timeout: int = oc_cfg.get("timeout", 300)
         self.registered_specialists: List[Dict[str, Any]] = cfg.get("specialists", [])
 

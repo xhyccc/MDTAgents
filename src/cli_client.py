@@ -26,7 +26,7 @@ class OpenCodeClient:
     Agent's response.
     """
 
-    def __init__(self, error_log_dir: Optional[Path] = None, default_model: str = "claude-sonnet-4"):
+    def __init__(self, error_log_dir: Optional[Path] = None, default_model: Optional[str] = None):
         self.error_log_dir = error_log_dir
         self.default_model = default_model
 
@@ -83,7 +83,10 @@ class OpenCodeClient:
         cmd = [
             "opencode",
             "run",
-            "--model", effective_model,
+        ]
+        if effective_model:
+            cmd += ["--model", effective_model]
+        cmd += [
             "--system-prompt", sp_path,
             "--message", user_message,
         ]
