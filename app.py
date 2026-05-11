@@ -368,7 +368,7 @@ with tab_admin:
     st.subheader("OpenCode 设置")
     oc_cfg = cfg.get("opencode", {})
     col1, col2, col3 = st.columns(3)
-    new_model = col1.text_input("默认模型", value=oc_cfg.get("default_model", "claude-sonnet-4"))
+    new_model = col1.text_input("默认模型（留空使用 opencode 内置默认）", value=oc_cfg.get("default_model", ""))
     new_timeout = col2.number_input(
         "超时（秒）", min_value=30, max_value=3600, value=int(oc_cfg.get("timeout", 300))
     )
@@ -422,12 +422,14 @@ with tab_admin:
 
     st.divider()
     if st.button("💾 保存配置", type="primary"):
+        oc_new: Dict[str, Any] = {
+            "timeout": int(new_timeout),
+            "max_workers": int(new_max_workers),
+        }
+        if new_model.strip():
+            oc_new["default_model"] = new_model.strip()
         new_cfg = {
-            "opencode": {
-                "default_model": new_model,
-                "timeout": int(new_timeout),
-                "max_workers": int(new_max_workers),
-            },
+            "opencode": oc_new,
             "specialists": updated_specialists,
             "workflow": {**wf_cfg, "enable_debate": enable_debate},
             "paths": cfg.get("paths", {}),
