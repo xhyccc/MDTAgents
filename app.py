@@ -151,7 +151,7 @@ with st.sidebar:
     oc_cfg = cfg.get("opencode", {})
     st.markdown("**当前配置**")
     st.code(
-        f"模型: {oc_cfg.get('default_model', 'N/A')}\n"
+        f"模型: {oc_cfg.get('default_model', '(opencode 内置默认)')}\n"
         f"超时: {oc_cfg.get('timeout', 'N/A')}s\n"
         f"最大并发: {oc_cfg.get('max_workers', 'N/A')}",
         language=None,
@@ -390,13 +390,18 @@ with tab_admin:
             f"名称_{i}", value=spec.get("name", ""), label_visibility="collapsed"
         )
         model_val = cols[1].text_input(
-            f"模型_{i}", value=spec.get("model", new_model), label_visibility="collapsed"
+            f"模型_{i}", value=spec.get("model", ""), label_visibility="collapsed"
         )
         if not cols[2].button("✕", key=f"remove_spec_{i}"):
-            updated_specialists.append({**spec, "name": name_val, "model": model_val})
+            entry = {**spec, "name": name_val}
+            if model_val.strip():
+                entry["model"] = model_val.strip()
+            else:
+                entry.pop("model", None)
+            updated_specialists.append(entry)
 
     if st.button("➕ 添加专科"):
-        updated_specialists.append({"name": "新专科", "model": new_model, "file_categories": []})
+        updated_specialists.append({"name": "新专科", "file_categories": []})
         st.rerun()
 
     st.subheader("已有 Prompt 文件")
