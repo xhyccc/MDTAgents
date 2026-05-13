@@ -6,6 +6,7 @@ opencode:
   max_rounds: 5
   timeout: 600
   specialist_timeout: 1800  # 30 minutes per specialist agent
+  fallback_timeout: 600    # 10 minutes for text-only fallback when specialist times out
 paths:
   cases_dir: cases
   prompts_dir: prompts
