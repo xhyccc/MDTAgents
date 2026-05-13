@@ -33,35 +33,39 @@ Output format (Markdown + Mermaid)
 
 ---
 
-## II. Staging Evidence Matrix
+## II. Diagnostic Staging / Assessment Matrix
 
-| Staging Dimension | Source File | Specific Value / Description | Conclusion |
-|-------------------|-------------|------------------------------|------------|
-| T (primary tumor) | | | T? |
-| N (regional nodes) | | | N? |
-| M (distant metastasis) | | | M? |
-| **Overall Clinical Stage** | | | |
+> Select staging or grading system per disease type (oncology → TNM; liver disease → Child-Pugh; cardiac function → NYHA; stroke → NIHSS, etc.); fill "—" for inapplicable dimensions.
+
+| Assessment Dimension | Source File | Specific Value / Description | Conclusion |
+|---------------------|-------------|------------------------------|------------|
+| Dimension 1 (e.g., T / functional grade / lesion extent) | | | |
+| Dimension 2 (e.g., N / severity / involvement) | | | |
+| Dimension 3 (e.g., M / systemic involvement / complications) | | | |
+| **Overall Staging / Assessment Conclusion** | | | |
 
 ---
 
-## III. Molecular Marker Summary
+## III. Key Diagnostic Markers Summary
 
-> Fill in only markers **actually documented** in pathology or molecular testing reports. If unavailable, state "No molecular testing data available."
+> Fill in only markers **actually documented** in workspace files. If unavailable, state "No relevant testing data available." Fill applicable markers per disease type (oncology → driver genes / PD-L1; cardiovascular → cTnI / BNP; rheumatology → ANA / ANCA, etc.).
 
-| Marker / Gene | Test Method | Result | Clinical Significance | Targeted / Immunotherapy Option |
-|--------------|-------------|--------|-----------------------|--------------------------------|
+| Indicator / Marker | Test Method | Result | Clinical Significance | Treatment Relevance |
+|-------------------|-------------|--------|-----------------------|--------------------|
 | | | | | |
 
 ---
 
 ## IV. Specialist Opinion Matrix
 
+> Add or remove rows dynamically based on actual participating specialties; fill "—" for absent or inapplicable specialties.
+
 | Specialty | Key Findings (data-driven) | Main Conclusion | Recommended Direction | Uncertainty / Data Gaps |
 |-----------|--------------------------|-----------------|----------------------|------------------------|
 | Radiology | | | | |
 | Pathology | | | | |
 | Internal Medicine | | | | |
-| Medical Oncology | | | | |
+| Medical Oncology / Systemic Therapy | | | | |
 | Surgery | | | | |
 
 ---
@@ -97,20 +101,20 @@ For each disagreement, state: ① Does current evidence favor one side? ② Is a
 
 ```mermaid
 flowchart TD
-    A[MDT Conclusion] --> B{Resectability Assessment}
-    B -->|Resectable| C[Upfront Surgery]
-    B -->|Borderline resectable| D[Neoadjuvant Therapy]
-    B -->|Unresectable| E[Systemic Therapy]
-    C --> F{Molecular Target Positive?}
-    F -->|Yes| G[Targeted Adjuvant Therapy]
-    F -->|No| H[Chemo / Immunotherapy Adjuvant]
-    D --> I[Imaging Re-evaluation]
-    I -->|Downstaged| C
-    I -->|No downstaging| E
-    E --> J[Response Assessment]
+    A[MDT Conclusion] --> B{Primary Treatment Strategy}
+    B -->|Locoregional treatment first| C[Surgery / Intervention / Ablation / Radiation]
+    B -->|Systemic treatment first| D[Drug Therapy]
+    B -->|Combined local + systemic| E[Combined Strategy]
+    C --> F{Adjuvant treatment needed?}
+    F -->|Yes| G[Adjuvant / Sequential Systemic Therapy]
+    F -->|No| H[Surveillance]
+    D --> I[Response Assessment]
+    I -->|Effective| J[Maintenance / Continue Treatment]
+    I -->|Progression / Intolerance| K[Regimen Adjustment / 2nd-line]
+    E --> I
 ```
 
-> **Note:** Update node labels and branch conditions to match this patient's actual MDT conclusions and Section VI regimens.
+> **Note:** This is a generic template — replace node labels and branches with the actual MDT conclusions for this patient (e.g., for oncology cases, refine as "Resectability → Neoadjuvant → Surgery" pathway). Align with Section VI regimens.
 
 ---
 
@@ -120,13 +124,13 @@ flowchart TD
 gantt
     title Proposed Treatment Plan (illustrative)
     dateFormat  YYYY-MM-DD
-    section Pre-op / Neoadjuvant
-    Supplementary imaging / pathology   :a1, 2026-05-20, 7d
-    Neoadjuvant therapy (if applicable) :a2, after a1, 42d
-    section Surgery
-    Surgery                             :b1, after a2, 7d
-    section Post-op
-    Adjuvant therapy                    :c1, after b1, 84d
+    section Preparation Phase
+    Supplementary investigations / workup   :a1, 2026-05-20, 7d
+    Induction / Neoadjuvant therapy (if applicable) :a2, after a1, 42d
+    section Primary Treatment
+    Primary intervention (surgery / procedure / systemic) :b1, after a2, 7d
+    section Subsequent Treatment & Follow-up
+    Adjuvant / Maintenance therapy      :c1, after b1, 84d
     Follow-up assessment (every 3 mo)   :c2, after c1, 30d
 ```
 
