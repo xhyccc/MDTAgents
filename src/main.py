@@ -32,6 +32,7 @@ def main() -> None:
     from src.scanner import Scanner
     from src.coordinator import Coordinator
     from src.specialist_pool import SpecialistPool
+    from src.context_extractor import ContextExtractor
 
     # ── Round 0: Initialise workspace & scan ──────────────────────────
     bus = FileBus(case_dir)
@@ -43,10 +44,23 @@ def main() -> None:
     bus.save_manifest(manifest)
     print(f"[Main] Found {manifest.total_files} file(s). Manifest saved.")
 
+    # ── Context extraction (deterministic, before any AI) ─────────────
+    file_paths = [case_dir / fe.path for fe in manifest.files]
+    extractor = ContextExtractor(bus.context_dir)
+    print("[Main] Extracting file contexts…")
+    extractor.extract_all(file_paths, progress_cb=lambda msg: print(f"  {msg}"))
+    print("[Main] Context extraction complete.")
+
     # ── Rounds 1–2: Coordinator index + dispatch ───────────────────────
     coordinator = Coordinator(bus, config_path=config_path, prompts_dir=prompts_dir)
     index = coordinator.run_index(manifest)
     dispatch = coordinator.run_dispatch(index)
+
+    # ── Build per-agent workspaces (deterministic, after dispatch) ─────
+    print("[Main] Building agent workspaces…")
+    workspaces = bus.build_agent_workspaces(dispatch)
+    for name, ws in workspaces.items():
+        print(f"  {name}: {ws}")
 
     # ── Round 3: Parallel specialist consultation ──────────────────────
     pool = SpecialistPool(bus, config_path=config_path, prompts_dir=prompts_dir)

@@ -229,6 +229,21 @@ class TestCoordinatorRunDispatch:
         assert len(result["specialists_required"]) == 2
         assert coordinator.bus.dispatch_path.exists()
 
+    def test_run_dispatch_passes_read_not_allowed(self, tmp_path: Path):
+        """Dispatcher must not attempt to read files — all context is in index JSON."""
+        coordinator = _make_coordinator(tmp_path)
+        calls: list = []
+
+        def capture(**kw):
+            calls.append(kw)
+            return json.dumps(SAMPLE_DISPATCH)
+
+        with patch.object(coordinator.client, "run", side_effect=capture):
+            coordinator.run_dispatch(SAMPLE_INDEX)
+
+        assert calls, "client.run was never called"
+        assert calls[0].get("read_allowed") is False
+
 
 # ---------------------------------------------------------------------------
 # Coordinator.run_synthesis
@@ -250,3 +265,148 @@ class TestCoordinatorRunSynthesis:
         assert coordinator.bus.report_path.exists()
         saved = coordinator.bus.report_path.read_text(encoding="utf-8")
         assert "MDT Final Report" in saved
+
+    def test_run_synthesis_passes_read_not_allowed(self, tmp_path: Path):
+        """Synthesis has all opinions embedded; model must not use the read tool."""
+        coordinator = _make_coordinator(tmp_path)
+        calls: list = []
+
+        def capture(**kw):
+            calls.append(kw)
+            return "Final report."
+
+        with patch.object(coordinator.client, "run", side_effect=capture):
+            coordinator.run_synthesis(SAMPLE_INDEX, {"影像科": "正常", "病理科": "无异常"})
+
+        assert calls, "client.run was never called"
+        assert calls[0].get("read_allowed") is False
+
+
+# ---------------------------------------------------------------------------
+# Coordinator.run_index (read_allowed + file_texts injection)
+# ---------------------------------------------------------------------------
+
+class TestCoordinatorRunIndexReadAllowed:
+    def test_run_index_passes_read_not_allowed(self, tmp_path: Path):
+        """Index agent receives all content in the prompt; file reading is disabled."""
+        coordinator = _make_coordinator(tmp_path)
+        calls: list = []
+
+        def capture(**kw):
+            calls.append(kw)
+            return json.dumps(SAMPLE_INDEX)
+
+        manifest = Manifest(
+            case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0
+        )
+        with patch.object(coordinator.client, "run", side_effect=capture):
+            coordinator.run_index(manifest)
+
+        assert calls, "client.run was never called"
+        assert calls[0].get("read_allowed") is False
+
+    def test_run_index_embeds_file_texts_in_prompt(self, tmp_path: Path):
+        """The user message must include the full text extracted from case files."""
+        # Add a file with recognisable content so we can assert it appears in prompt.
+        bus = _make_bus(tmp_path)
+        (bus.case_dir / "入院记录.md").write_text("主诉：咳嗽三天", encoding="utf-8")
+        cfg_path = _make_config(tmp_path)
+        prompts_dir = _make_prompts(tmp_path)
+
+        # Update index prompt template to include the {file_texts} placeholder.
+        (prompts_dir / "coordinator_index.md").write_text(
+            "INDEX: {case_dir} {total_files} {manifest_json} {file_texts}",
+            encoding="utf-8",
+        )
+        coordinator = Coordinator(bus=bus, config_path=cfg_path, prompts_dir=prompts_dir)
+
+        calls: list = []
+        with patch.object(coordinator.client, "run", side_effect=lambda **kw: calls.append(kw) or json.dumps(SAMPLE_INDEX)):
+            coordinator.run_index(Manifest(
+                case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0
+            ))
+
+        assert calls
+        user_msg = calls[0]["user_message"]
+        assert "主诉：咳嗽三天" in user_msg or "入院记录" in user_msg
+
+
+# ---------------------------------------------------------------------------
+# Coordinator._build_file_texts
+# ---------------------------------------------------------------------------
+
+class TestBuildFileTexts:
+    """Unit tests for the _build_file_texts helper method."""
+
+    def test_returns_content_from_md_file(self, tmp_path: Path):
+        """Plain .md files in the case dir should appear in the output."""
+        coordinator = _make_coordinator(tmp_path)
+        # _make_coordinator places CT检查.md with content "CT所见：正常"
+        result = coordinator._build_file_texts()
+        assert "CT所见：正常" in result
+
+    def test_section_header_format(self, tmp_path: Path):
+        """Each file's section should be prefixed with '=== <rel_path> ==='."""
+        coordinator = _make_coordinator(tmp_path)
+        result = coordinator._build_file_texts()
+        assert "===" in result and "CT检查.md" in result
+
+    def test_prefers_context_txt_over_raw_file(self, tmp_path: Path):
+        """When a context .txt exists it must be used instead of the raw file."""
+        coordinator = _make_coordinator(tmp_path)
+        bus = coordinator.bus
+
+        # Create a context .txt with different content for CT检查.md
+        ctx_dir = bus.file_context_dir(bus.case_dir / "CT检查.md")
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        (ctx_dir / "CT检查.txt").write_text("EXTRACTED: 胸部CT未见明显异常", encoding="utf-8")
+
+        result = coordinator._build_file_texts()
+        assert "EXTRACTED: 胸部CT未见明显异常" in result
+        assert "CT所见：正常" not in result  # raw .md content should be replaced
+
+    def test_skips_files_in_workspace_dir(self, tmp_path: Path):
+        """Files inside .mdt_workspace/ must never appear in the output."""
+        coordinator = _make_coordinator(tmp_path)
+        bus = coordinator.bus
+
+        # Plant a file inside the workspace dir
+        workspace_file = bus.workspace_dir / "secret.md"
+        workspace_file.write_text("应该被忽略的内容", encoding="utf-8")
+
+        result = coordinator._build_file_texts()
+        assert "应该被忽略的内容" not in result
+
+    def test_skips_unsupported_extensions(self, tmp_path: Path):
+        """Binary/unsupported files (e.g. .png) must not appear in the output."""
+        coordinator = _make_coordinator(tmp_path)
+        (coordinator.bus.case_dir / "photo.png").write_bytes(b"\x89PNG\r\n")
+
+        result = coordinator._build_file_texts()
+        # No section header for .png should appear
+        assert "photo.png" not in result
+
+    def test_multiple_files_all_included(self, tmp_path: Path):
+        """All supported files in the case dir should produce separate sections."""
+        coordinator = _make_coordinator(tmp_path)
+        (coordinator.bus.case_dir / "血常规.md").write_text("白细胞：5.0", encoding="utf-8")
+        (coordinator.bus.case_dir / "病理报告.md").write_text("腺癌", encoding="utf-8")
+
+        result = coordinator._build_file_texts()
+        assert "CT所见：正常" in result
+        assert "白细胞：5.0" in result
+        assert "腺癌" in result
+
+    def test_empty_case_returns_placeholder(self, tmp_path: Path):
+        """A case dir with no supported text files returns the placeholder string."""
+        # Create a fresh coordinator whose case dir has no supported files.
+        case_dir = tmp_path / "empty_case"
+        case_dir.mkdir()
+        cfg_path = _make_config(tmp_path)
+        prompts_dir = _make_prompts(tmp_path)
+        bus = FileBus(case_dir)
+        bus.init_workspace()
+        coordinator = Coordinator(bus=bus, config_path=cfg_path, prompts_dir=prompts_dir)
+
+        result = coordinator._build_file_texts()
+        assert result == "(no text content found)"

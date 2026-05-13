@@ -117,6 +117,35 @@ def _extract_text_xlsx(path: Path) -> str:
         return f"[XLSX read error: {exc}]"
 
 
+def _extract_text_html(path: Path) -> str:
+    """Convert HTML to plain text via html2text."""
+    try:
+        import html2text  # type: ignore
+        h = html2text.HTML2Text()
+        h.ignore_links = False
+        h.ignore_images = True
+        h.body_width = 0
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        return h.handle(raw)
+    except ImportError:
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            import re
+            return re.sub(r"<[^>]+>", "", raw)
+        except Exception as exc:
+            return f"[HTML read error: {exc}]"
+    except Exception as exc:
+        return f"[HTML read error: {exc}]"
+
+
+def _extract_text_image(path: Path) -> str:
+    """Return a placeholder for image files — actual content passed via --file."""
+    return f"[Image file: {path.name} — will be passed as visual attachment]"
+
+
+# Image suffixes handled natively as --file attachments to the model
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
+
 # Map of file suffixes → extractor functions
 _SUFFIX_EXTRACTORS = {
     ".md": _extract_text_plain,
@@ -126,6 +155,13 @@ _SUFFIX_EXTRACTORS = {
     ".pdf": _extract_text_pdf,
     ".docx": _extract_text_docx,
     ".xlsx": _extract_text_xlsx,
+    ".html": _extract_text_html,
+    ".htm": _extract_text_html,
+    ".png": _extract_text_image,
+    ".jpg": _extract_text_image,
+    ".jpeg": _extract_text_image,
+    ".webp": _extract_text_image,
+    ".gif": _extract_text_image,
 }
 
 
@@ -135,6 +171,28 @@ def _extract_text(path: Path) -> str:
     if extractor is None:
         return f"[Unsupported format: {suffix}]"
     return extractor(path)
+
+
+def _pdf_to_images(pdf_path: Path) -> List[Path]:
+    """Render each page of a scanned PDF to a PNG image beside the original file."""
+    try:
+        import fitz  # type: ignore  # PyMuPDF
+        doc = fitz.open(str(pdf_path))
+        stem = pdf_path.stem
+        out_dir = pdf_path.parent
+        image_paths: List[Path] = []
+        for i, page in enumerate(doc):
+            mat = fitz.Matrix(2.0, 2.0)  # 2× zoom → ~150 DPI
+            pix = page.get_pixmap(matrix=mat)
+            out_path = out_dir / f"{stem}_page_{i + 1:03d}.png"
+            pix.save(str(out_path))
+            image_paths.append(out_path)
+        doc.close()
+        return image_paths
+    except ImportError:
+        return []
+    except Exception:
+        return []
 
 
 def _checksum(path: Path) -> str:
@@ -170,7 +228,11 @@ class Scanner:
     SUPPORTED_SUFFIXES = frozenset(_SUFFIX_EXTRACTORS.keys())
 
     def scan(self, case_dir: Path) -> Manifest:
-        """Scan *case_dir* and return a populated Manifest."""
+        """Scan *case_dir* and return a populated Manifest.
+
+        For scanned (image-only) PDFs, renders each page as a PNG and adds
+        those images to the manifest so they can be passed as visual attachments.
+        """
         case_dir = Path(case_dir).resolve()
         manifest = Manifest(
             case_id=case_dir.name,
@@ -192,6 +254,22 @@ class Scanner:
                 size = file_path.stat().st_size
                 mime = _mime_type(file_path)
                 raw_text = _extract_text(file_path)
+
+                # For scanned PDFs (no extractable text), render pages as images
+                if suffix == ".pdf" and not raw_text.strip():
+                    image_paths = _pdf_to_images(file_path)
+                    for img_path in image_paths:
+                        img_rel = str(img_path.relative_to(case_dir))
+                        manifest.files.append(FileEntry(
+                            path=img_rel,
+                            size=img_path.stat().st_size,
+                            mime_type="image/png",
+                            preview=_extract_text_image(img_path),
+                            checksum=_checksum(img_path),
+                        ))
+                    # Skip the original empty PDF entry
+                    continue
+
                 preview = raw_text[:PREVIEW_CHARS]
                 csum = _checksum(file_path)
 

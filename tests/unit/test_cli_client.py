@@ -27,6 +27,13 @@ def _make_completed_process(stdout: str = "ok", returncode: int = 0, stderr: str
     return cp
 
 
+def _make_event_stream(text: str) -> str:
+    """Return a minimal opencode --format json event stream containing *text*."""
+    import json as _json
+    event = {"type": "text", "part": {"text": text}}
+    return _json.dumps(event) + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -35,7 +42,8 @@ class TestOpenCodeClientSuccess:
     def test_run_returns_stdout(self, tmp_path: Path):
         client = _make_client(tmp_path)
         expected_output = '{"result": "success"}'
-        with patch("subprocess.run", return_value=_make_completed_process(stdout=expected_output)):
+        stream = _make_event_stream(expected_output)
+        with patch("subprocess.run", return_value=_make_completed_process(stdout=stream)):
             result = client.run(
                 agent_name="test_agent",
                 system_prompt="You are a test agent.",
@@ -159,3 +167,78 @@ class TestAgentError:
         err = AgentError("something went wrong")
         assert isinstance(err, RuntimeError)
         assert str(err) == "something went wrong"
+
+
+# ---------------------------------------------------------------------------
+# read_allowed permission flag
+# ---------------------------------------------------------------------------
+
+class TestReadAllowedPermission:
+    """Verify that the `read_allowed` parameter controls the agent frontmatter."""
+
+    def _capture_frontmatter(self, tmp_path: Path, **run_kwargs) -> str:
+        """Run client.run() with a patched AGENTS_DIR; return the frontmatter written."""
+        agents_dir = tmp_path / ".opencode" / "agents"
+        captured: dict = {}
+
+        def _fake_run(cmd, **kwargs):
+            # Agent file exists here — capture before finally block deletes it.
+            for f in agents_dir.glob("mdt_*.md"):
+                captured["content"] = f.read_text(encoding="utf-8")
+            return _make_completed_process()
+
+        client = _make_client(tmp_path)
+        with patch.object(OpenCodeClient, "AGENTS_DIR", agents_dir):
+            with patch("subprocess.run", side_effect=_fake_run):
+                client.run(
+                    agent_name="test_agent",
+                    system_prompt="system",
+                    user_message="hello",
+                    **run_kwargs,
+                )
+        return captured.get("content", "")
+
+    def test_default_read_permission_is_allow(self, tmp_path: Path):
+        """No read_allowed kwarg → frontmatter has 'read: allow'."""
+        content = self._capture_frontmatter(tmp_path)
+        assert "read: allow" in content
+
+    def test_read_allowed_false_writes_deny(self, tmp_path: Path):
+        """read_allowed=False → frontmatter has 'read: deny'."""
+        content = self._capture_frontmatter(tmp_path, read_allowed=False)
+        assert "read: deny" in content
+        assert "read: allow" not in content
+
+    def test_read_allowed_true_explicit_writes_allow(self, tmp_path: Path):
+        """read_allowed=True (explicit) → frontmatter has 'read: allow'."""
+        content = self._capture_frontmatter(tmp_path, read_allowed=True)
+        assert "read: allow" in content
+        assert "read: deny" not in content
+
+    def test_frontmatter_bash_always_denied(self, tmp_path: Path):
+        """bash and edit permissions should always be deny regardless of read_allowed."""
+        for flag in (True, False):
+            content = self._capture_frontmatter(tmp_path, read_allowed=flag)
+            assert "bash: deny" in content
+            assert "edit: deny" in content
+
+    def test_system_prompt_appended_after_frontmatter(self, tmp_path: Path):
+        """System prompt text should follow the YAML frontmatter block."""
+        content = self._capture_frontmatter(tmp_path)
+        # The frontmatter ends with '---', then system prompt follows
+        assert "---" in content
+        assert "system" in content  # matches system_prompt="system"
+
+    def test_read_allowed_false_does_not_affect_subprocess_invocation(self, tmp_path: Path):
+        """read_allowed=False should not suppress the subprocess call itself."""
+        agents_dir = tmp_path / ".opencode" / "agents"
+        client = _make_client(tmp_path)
+        with patch.object(OpenCodeClient, "AGENTS_DIR", agents_dir):
+            with patch("subprocess.run", return_value=_make_completed_process()) as mock_run:
+                client.run(
+                    agent_name="t",
+                    system_prompt="s",
+                    user_message="m",
+                    read_allowed=False,
+                )
+        mock_run.assert_called_once()

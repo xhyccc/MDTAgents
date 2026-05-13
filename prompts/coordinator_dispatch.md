@@ -19,8 +19,7 @@
     {
       "name": "影像科",
       "reason": "有CT和MRI资料，需评估肿瘤分期与可切除性",
-      "files_assigned": ["CT检查.md", "MRI.md"],
-      "model": "claude-sonnet-4"
+      "files_assigned": ["CT检查.md", "MRI.md"]
     }
   ],
   "notes": ["string（调度备注）"]

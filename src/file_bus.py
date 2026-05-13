@@ -42,6 +42,7 @@ class FileBus:
         self.workspace_dir: Path = self.case_dir / WORKSPACE_DIR_NAME
         self.opinions_dir: Path = self.workspace_dir / "03_opinions"
         self.errors_dir: Path = self.workspace_dir / "errors"
+        self.context_dir: Path = self.workspace_dir / "context"  # extracted text files for agents
 
         # Convenient path references
         self.manifest_path: Path = self.workspace_dir / "00_manifest.json"
@@ -60,8 +61,67 @@ class FileBus:
             self.workspace_dir,
             self.opinions_dir,
             self.errors_dir,
+            self.context_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Agent workspace helpers
+    # ------------------------------------------------------------------
+
+    def file_context_dir(self, file_path: Path) -> Path:
+        """Return context subfolder for *file_path* inside context_dir.
+
+        E.g. ``cases/x/报告.pdf`` → ``.mdt_workspace/context/报告_pdf/``
+        """
+        stem = file_path.stem
+        ext = file_path.suffix.lstrip(".").lower() or "file"
+        return self.context_dir / f"{stem}_{ext}"
+
+    def agent_workspace_dir(self, name: str) -> Path:
+        """Return per-agent workspace directory path (inside .mdt_workspace/)."""
+        return self.workspace_dir / f"{name}_workspace"
+
+    def build_agent_workspaces(self, dispatch: Dict[str, Any]) -> Dict[str, Path]:
+        """Create per-agent workspace dirs populated with assigned files + context folders.
+
+        For each specialist in *dispatch*, creates::
+
+            .mdt_workspace/{name}_workspace/
+            ├── original_file.pdf
+            ├── original_file_pdf/
+            │   ├── original_file.txt
+            │   ├── page_001.png
+            │   └── image_001.png
+            └── …
+
+        Returns
+        -------
+        dict
+            ``{specialist_name: workspace_path}`` for every specialist.
+        """
+        import shutil
+        workspaces: Dict[str, Path] = {}
+        for spec in dispatch.get("specialists_required", []):
+            name: str = spec["name"]
+            ws = self.agent_workspace_dir(name)
+            ws.mkdir(parents=True, exist_ok=True)
+            for rel in spec.get("files_assigned", []):
+                src = self.case_dir / rel
+                if not src.exists():
+                    continue
+                # Copy original file (skip if already there)
+                dst_file = ws / src.name
+                if not dst_file.exists():
+                    shutil.copy2(src, dst_file)
+                # Copy context folder if it exists
+                ctx_folder = self.file_context_dir(src)
+                if ctx_folder.exists():
+                    dst_ctx = ws / ctx_folder.name
+                    if not dst_ctx.exists():
+                        shutil.copytree(src=ctx_folder, dst=dst_ctx)
+            workspaces[name] = ws
+        return workspaces
 
     # ------------------------------------------------------------------
     # Write helpers
