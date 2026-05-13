@@ -67,8 +67,12 @@ class TestScannerBasic:
         })
         scanner = Scanner()
         manifest = scanner.scan(case_dir)
-        assert manifest.total_files == 1
-        assert manifest.files[0].path == "a.md"
+        # .md and .png are supported; .mp4 is not
+        assert manifest.total_files == 2
+        paths = {f.path for f in manifest.files}
+        assert "a.md" in paths
+        assert "b.png" in paths
+        assert "c.mp4" not in paths
 
     def test_workspace_dir_excluded(self, tmp_path: Path):
         case_dir = tmp_path
