@@ -248,7 +248,7 @@ class TestRunSpecialistFallback:
         with patch.object(pool.client, "run", return_value="fallback result"):
             pool._run_specialist_fallback(SAMPLE_SPEC)
 
-        saved = pool.bus.opinions_dir / "影像科.md"
+        saved = pool.bus.opinions_dir / "影像科.html"
         assert saved.exists()
         assert "fallback result" in saved.read_text(encoding="utf-8")
 
@@ -306,6 +306,6 @@ class TestRunSpecialistTimeoutFallback:
         with patch.object(pool.client, "run", side_effect=_raise_timeout):
             pool._run_specialist(SAMPLE_SPEC)
 
-        saved = pool.bus.opinions_dir / "影像科.md"
+        saved = pool.bus.opinions_dir / "影像科.html"
         assert saved.exists()
         assert "fallback text" in saved.read_text(encoding="utf-8")

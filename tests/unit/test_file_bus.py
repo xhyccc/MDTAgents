@@ -58,7 +58,7 @@ class TestFileBusPaths:
         assert bus.index_path    == ws / "01_index.json"
         assert bus.dispatch_path == ws / "02_dispatch.json"
         assert bus.debate_path   == ws / "04_debate.json"
-        assert bus.report_path   == ws / "05_mdt_report.md"
+        assert bus.report_path   == ws / "05_mdt_report.html"
 
 
 class TestFileBusWorkspaceInit:
@@ -115,6 +115,14 @@ class TestFileBusWriteRead:
         assert opinion_path.exists()
         assert opinion_path.read_text(encoding="utf-8") == "影像所见：…"
 
+    def test_save_opinion_md_creates_md_file(self, tmp_path: Path):
+        bus = _make_bus(tmp_path)
+        bus.init_workspace()
+        md_path = bus.save_opinion_md("影像科", "# 影像会诊意见\n\n正常。")
+        assert md_path.exists()
+        assert md_path.suffix == ".md"
+        assert "影像会诊意见" in md_path.read_text(encoding="utf-8")
+
     def test_load_opinions_returns_all(self, tmp_path: Path):
         bus = _make_bus(tmp_path)
         bus.init_workspace()
@@ -124,6 +132,17 @@ class TestFileBusWriteRead:
         assert len(opinions) == 2
         assert opinions["影像科"] == "影像意见"
         assert opinions["病理科"] == "病理意见"
+
+    def test_load_opinions_md_returns_markdown_files(self, tmp_path: Path):
+        bus = _make_bus(tmp_path)
+        bus.init_workspace()
+        bus.save_opinion_md("影像科", "# 影像意见")
+        bus.save_opinion_md("病理科", "# 病理意见")
+        # save HTML too — should not appear in load_opinions_md
+        bus.save_opinion("外科", "<html>外科</html>")
+        opinions_md = bus.load_opinions_md()
+        assert set(opinions_md.keys()) == {"影像科", "病理科"}
+        assert opinions_md["影像科"] == "# 影像意见"
 
     def test_load_opinions_empty_dir(self, tmp_path: Path):
         bus = _make_bus(tmp_path)

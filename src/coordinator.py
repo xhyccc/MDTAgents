@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
-from src.cli_client import OpenCodeClient
-from src.file_bus import FileBus
+from src.cli_client import OpenCodeClient, make_agent_client
+from src.file_bus import FileBus, _md_to_html
 from src.scanner import Manifest, WORKSPACE_DIR_NAME
 
 
@@ -68,16 +69,25 @@ def _extract_json(text: str) -> Dict[str, Any]:
     Try to parse JSON from Agent output.
 
     The Agent may wrap its JSON in a Markdown code block — strip that first.
+    Falls back to scanning for the first top-level ``{`` or ``[`` at a line
+    boundary, which handles mini-agent ASCII-art banners that contain stray
+    ``{…}`` sequences before the actual JSON payload.
     """
     # Strip ```json ... ``` or ``` ... ``` fences if present
     stripped = re.sub(r"```[a-zA-Z]*\n?", "", text).replace("```", "").strip()
     try:
         return json.loads(stripped)
     except json.JSONDecodeError:
-        # Fallback: try to find the first { ... } block
-        match = re.search(r"\{.*\}", stripped, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
+        # Fallback: find the first line whose content starts with { or [
+        # (skipping banner lines that begin with | or + but may contain braces)
+        lines = stripped.splitlines()
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith(("{", "[")):
+                candidate = "\n".join(lines[i:]).strip()
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass
         raise ValueError(f"Could not parse JSON from Agent output:\n{text[:500]}")
 
 
@@ -114,14 +124,54 @@ class Coordinator:
         oc_cfg = cfg.get("opencode", {})
         self.default_model: Optional[str] = oc_cfg.get("default_model") or None
         self.timeout: int = oc_cfg.get("timeout", 300)
+        self.coordinator_timeout: int = oc_cfg.get("coordinator_timeout", self.timeout)
+        self.synthesis_timeout: int = oc_cfg.get("synthesis_timeout", self.coordinator_timeout)
+        self.coordinator_retries: int = oc_cfg.get("coordinator_retries", 1)
         self.registered_specialists: List[Dict[str, Any]] = cfg.get("specialists", [])
         # Language: explicit arg > config ui.language > default zh
         self.lang: str = lang or cfg.get("ui", {}).get("language", "zh")
 
-        self.client = OpenCodeClient(
+        self.client = make_agent_client(
+            cfg=oc_cfg,
             error_log_dir=bus.errors_dir,
-            default_model=self.default_model,
+            log_dir=bus.logs_dir,
         )
+
+    # ------------------------------------------------------------------
+    # Internal: retry wrapper
+    # ------------------------------------------------------------------
+
+    def _run_with_retry(
+        self,
+        fn: Callable[[], Any],
+        step_name: str,
+        retries: Optional[int] = None,
+        retry_delay: float = 5.0,
+    ) -> Any:
+        """Call *fn()* up to *retries* times, retrying on AgentError.
+
+        Each retry waits *retry_delay* seconds to give the API a moment to
+        recover before the next opencode subprocess is launched.
+        """
+        from src.cli_client import AgentError
+        max_attempts = (retries if retries is not None else self.coordinator_retries)
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return fn()
+            except AgentError as exc:
+                last_exc = exc
+                if attempt < max_attempts:
+                    print(
+                        f"[Coordinator] {step_name} attempt {attempt}/{max_attempts} failed "
+                        f"({exc}). Retrying in {retry_delay}s…"
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    print(
+                        f"[Coordinator] {step_name} failed after {max_attempts} attempt(s): {exc}"
+                    )
+        raise last_exc  # re-raise the last exception after all retries exhausted
 
     # ------------------------------------------------------------------
     # Round 1: Index
@@ -155,7 +205,11 @@ class Coordinator:
                 parts.append(f"=== {rel} ===\n{text}")
         return "\n\n".join(parts) if parts else "(no text content found)"
 
-    def run_index(self, manifest: Manifest) -> Dict[str, Any]:
+    def run_index(
+        self,
+        manifest: Manifest,
+        on_event: Optional[Callable[[dict], None]] = None,
+    ) -> Dict[str, Any]:
         """
         Ask the Coordinator Agent to classify files and assess completeness.
 
@@ -166,13 +220,11 @@ class Coordinator:
         base_prompt = _load_prompt(prompt_path, self.lang)
 
         manifest_json = json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2)
-        file_texts = self._build_file_texts()
         user_message = _render(
             base_prompt,
             case_dir=str(self.bus.case_dir),
             total_files=manifest.total_files,
             manifest_json=manifest_json,
-            file_texts=file_texts,
         )
 
         print("[Coordinator] Round 1: Building file index …")
@@ -181,13 +233,17 @@ class Coordinator:
             if self.lang == "en" else
             "你是 MDT 病例资料管理员，负责文件分类。"
         )
-        raw = self.client.run(
-            agent_name="coordinator_index",
-            system_prompt=sys_prompt,
-            user_message=user_message,
-            model=self.default_model,
-            timeout=self.timeout,
-            read_allowed=False,
+        raw = self._run_with_retry(
+            lambda: self.client.run(
+                agent_name="coordinator_index",
+                system_prompt=sys_prompt,
+                user_message=user_message,
+                model=self.default_model,
+                timeout=self.coordinator_timeout,
+                read_allowed=False,
+                on_event=on_event,
+            ),
+            step_name="run_index",
         )
 
         index = _extract_json(raw)
@@ -196,10 +252,92 @@ class Coordinator:
         return index
 
     # ------------------------------------------------------------------
+    # Rounds 1+2 combined: Index + Dispatch (single opencode call)
+    # ------------------------------------------------------------------
+
+    def run_index_and_dispatch(
+        self,
+        manifest: Manifest,
+        on_event: Optional[Callable[[dict], None]] = None,
+    ) -> tuple:
+        """
+        Classify files AND decide specialist dispatch in a single opencode call.
+
+        Saves 01_index.json and 02_dispatch.json separately for downstream
+        compatibility.  Returns (index, dispatch).
+
+        If both cached files already exist, skips the LLM call entirely.
+        """
+        if self.bus.index_path.exists() and self.bus.dispatch_path.exists():
+            try:
+                index = json.loads(self.bus.index_path.read_text(encoding="utf-8"))
+                dispatch = json.loads(self.bus.dispatch_path.read_text(encoding="utf-8"))
+                print(f"[Coordinator] Index+Dispatch loaded from cache → {self.bus.workspace_dir}")
+                return index, dispatch
+            except Exception:
+                pass  # corrupted cache — fall through and regenerate
+
+        prompt_path = self.prompts_dir / "coordinator_index_dispatch.md"
+        base_prompt = _load_prompt(prompt_path, self.lang)
+
+        manifest_json = json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2)
+
+        available_names = _available_specialist_names(self.prompts_dir, self.lang)
+        registered_by_name = {s["name"]: s for s in self.registered_specialists}
+        available_specialists = [
+            registered_by_name.get(name, {"name": name})
+            for name in available_names
+        ]
+        available_json = json.dumps(available_specialists, ensure_ascii=False, indent=2)
+
+        user_message = _render(
+            base_prompt,
+            case_dir=str(self.bus.case_dir),
+            total_files=manifest.total_files,
+            manifest_json=manifest_json,
+            available_specialists_json=available_json,
+        )
+
+        print("[Coordinator] Rounds 1+2: Classifying files and dispatching specialists …")
+        sys_prompt = (
+            "You are the MDT coordinator responsible for file classification and specialist dispatch."
+            if self.lang == "en" else
+            "你是 MDT 病例资料管理员兼主持人，负责文件分类与专科调度。"
+        )
+        raw = self._run_with_retry(
+            lambda: self.client.run(
+                agent_name="coordinator_index_dispatch",
+                system_prompt=sys_prompt,
+                user_message=user_message,
+                model=self.default_model,
+                timeout=self.coordinator_timeout,
+                read_allowed=False,
+                on_event=on_event,
+            ),
+            step_name="run_index_and_dispatch",
+        )
+
+        combined = _extract_json(raw)
+
+        _INDEX_KEYS = {"file_classifications", "case_completeness", "summary"}
+        _DISPATCH_KEYS = {"specialists_required", "notes"}
+        index = {k: v for k, v in combined.items() if k in _INDEX_KEYS}
+        dispatch = {k: v for k, v in combined.items() if k in _DISPATCH_KEYS}
+
+        self.bus.save_index(index)
+        self.bus.save_dispatch(dispatch)
+        print(f"[Coordinator] Index+Dispatch saved → {self.bus.workspace_dir}")
+        return index, dispatch
+
+    # ------------------------------------------------------------------
     # Round 2: Dispatch
     # ------------------------------------------------------------------
 
-    def run_dispatch(self, index: Dict[str, Any]) -> Dict[str, Any]:
+    def run_dispatch(
+        self,
+        index: Dict[str, Any],
+        on_event: Optional[Callable[[dict], None]] = None,
+    ) -> Dict[str, Any]:
         """
         Decide which specialists to involve, and which files each should read.
 
@@ -243,13 +381,17 @@ class Coordinator:
             if self.lang == "en" else
             "你是 MDT 主持人，负责决定专科会诊团队构成。"
         )
-        raw = self.client.run(
-            agent_name="coordinator_dispatch",
-            system_prompt=sys_prompt,
-            user_message=user_message,
-            model=self.default_model,
-            timeout=self.timeout,
-            read_allowed=False,
+        raw = self._run_with_retry(
+            lambda: self.client.run(
+                agent_name="coordinator_dispatch",
+                system_prompt=sys_prompt,
+                user_message=user_message,
+                model=self.default_model,
+                timeout=self.coordinator_timeout,
+                read_allowed=False,
+                on_event=on_event,
+            ),
+            step_name="run_dispatch",
         )
 
         dispatch = _extract_json(raw)
@@ -262,13 +404,16 @@ class Coordinator:
     # ------------------------------------------------------------------
 
     def run_synthesis(
-        self, index: Dict[str, Any], opinions: Dict[str, str]
+        self,
+        index: Dict[str, Any],
+        opinions: Dict[str, str],
+        on_event: Optional[Callable[[dict], None]] = None,
     ) -> str:
         """
         Generate the final MDT report from all specialist opinions.
 
         Input:  index + opinions
-        Output: Markdown report saved as 05_mdt_report.md
+        Output: HTML report saved as 05_mdt_report.html; HTML string returned.
         """
         prompt_path = self.prompts_dir / "coordinator_synthesis.md"
         base_prompt = _load_prompt(prompt_path, self.lang)
@@ -294,15 +439,26 @@ class Coordinator:
             if self.lang == "en" else
             "你是 MDT 主持人，拥有20年临床主持经验。"
         )
-        report_text = self.client.run(
-            agent_name="coordinator_synthesis",
-            system_prompt=sys_prompt,
-            user_message=user_message,
-            model=self.default_model,
-            timeout=self.timeout,
-            read_allowed=False,
+        report_text = self._run_with_retry(
+            lambda: self.client.run(
+                agent_name="coordinator_synthesis",
+                system_prompt=sys_prompt,
+                user_message=user_message,
+                model=self.default_model,
+                timeout=self.synthesis_timeout,
+                read_allowed=False,
+                bash_allowed=False,
+                on_event=on_event,
+            ),
+            step_name="run_synthesis",
         )
 
-        self.bus.save_report(report_text)
+        if not report_text or not report_text.strip():
+            raise ValueError(
+                "Synthesis agent returned empty output. "
+                "Check the audit log in logs/ for details."
+            )
+
+        self.bus.save_report(_md_to_html(report_text, title="MDT Report"))
         print(f"[Coordinator] Report saved → {self.bus.report_path}")
         return report_text

@@ -32,7 +32,7 @@ _WS_INDEX    = "01_index.json"
 _WS_DISPATCH = "02_dispatch.json"
 _WS_OPINIONS = "03_opinions"
 _WS_DEBATE   = "04_debate.json"
-_WS_REPORT   = "05_mdt_report.md"
+_WS_REPORT   = "05_mdt_report.html"
 _WS_ERRORS   = "errors"
 
 # ── i18n ─────────────────────────────────────────────────────────────────────
@@ -65,7 +65,6 @@ T: Dict[str, Dict[str, str]] = {
     "step_consult":     {"zh": "👥 专科会诊", "en": "👥 Consultation"},
     "step_report":      {"zh": "📝 综合报告", "en": "📝 Report"},
     "report_title":     {"zh": "📋 MDT 最终报告", "en": "📋 MDT Final Report"},
-    "dl_md":            {"zh": "⬇ 下载报告 (.md)", "en": "⬇ Download Report (.md)"},
     "dl_html":          {"zh": "⬇ 下载报告 (.html)", "en": "⬇ Download Report (.html)"},
     "dl_pdf":           {"zh": "⬇ 下载报告 (.pdf)", "en": "⬇ Download Report (.pdf)"},
     "media_gallery":    {"zh": "🖼 病例影像文件", "en": "🖼 Case Media Files"},
@@ -215,9 +214,9 @@ def _report_to_html(report_md: str) -> str:
 </html>"""
 
 
-def _report_to_pdf(report_md: str) -> Optional[bytes]:
-    """Returns PDF bytes, or None if no PDF library is available."""
-    html = _report_to_html(report_md)
+def _report_to_pdf(report_html: str) -> Optional[bytes]:
+    """Returns PDF bytes from a pre-rendered HTML string, or None if no PDF library is available."""
+    html = report_html
     try:
         import io
         from xhtml2pdf import pisa  # type: ignore
@@ -356,8 +355,9 @@ def _render_agents_diagram(dispatch: Dict[str, Any], opinions: Dict[str, str], l
                 st.write(f"• {note}")
 
 
-def _display_report_with_media(report_text: str, case_dir: Path, lg: str) -> None:
-    st.markdown(report_text)
+def _display_report_with_media(report_html: str, case_dir: Path, lg: str) -> None:
+    import streamlit.components.v1 as _cv1
+    _cv1.html(report_html, height=2000, scrolling=True)
     image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
     images = [
         f for f in sorted(case_dir.iterdir())
@@ -370,6 +370,55 @@ def _display_report_with_media(report_text: str, case_dir: Path, lg: str) -> Non
         for i, img_path in enumerate(images):
             with cols[i % 3]:
                 st.image(str(img_path), caption=img_path.name, use_container_width=True)
+
+
+def _make_llm_event_callback(placeholder):
+    """
+    Return an ``on_event`` callback that updates *placeholder* (a ``st.empty()``)
+    with human-readable LLM progress.
+
+    The opencode JSON event stream emits three relevant event types:
+
+    * ``step_start``  — LLM call has been submitted
+    * ``text``        — full assistant response arrived (includes timing metadata)
+    * ``step_finish`` — token counts available
+
+    All three arrive in the calling thread, so updating a Streamlit placeholder
+    here is safe for coordinator steps (which run in the main Streamlit thread).
+    """
+    state: dict = {"start_ts": None, "tokens": None}
+
+    def _cb(event: dict) -> None:
+        etype = event.get("type", "")
+        part = event.get("part", {})
+
+        if etype == "step_start":
+            state["start_ts"] = event.get("timestamp")
+            placeholder.caption("⏳ Waiting for LLM response…")
+
+        elif etype == "text":
+            elapsed_ms = (
+                (event.get("timestamp", 0) - state["start_ts"])
+                if state["start_ts"] else 0
+            )
+            timing = part.get("time", {})
+            llm_ms = (timing.get("end", 0) - timing.get("start", 0)) if timing else elapsed_ms
+            placeholder.caption(
+                f"💬 Response received — LLM latency **{llm_ms / 1000:.1f}s**"
+            )
+
+        elif etype == "step_finish":
+            tokens = part.get("tokens", {})
+            state["tokens"] = tokens
+            inp = tokens.get("input", 0)
+            out = tokens.get("output", 0)
+            cache_read = tokens.get("cache", {}).get("read", 0)
+            cache_note = f", {cache_read:,} cached" if cache_read else ""
+            placeholder.caption(
+                f"✅ {inp:,} input{cache_note} → {out:,} output tokens"
+            )
+
+    return _cb
 
 
 def _run_pipeline_inline(case_dir: Path, lg: str) -> None:
@@ -435,7 +484,9 @@ def _run_pipeline_inline(case_dir: Path, lg: str) -> None:
     coordinator = Coordinator(bus, config_path=config_path, prompts_dir=prompts_dir, lang=lg)
     with st.status(idx_label, expanded=True) as idx_status:
         try:
-            index = coordinator.run_index(manifest)
+            ev_ph = st.empty()
+            index = coordinator.run_index(manifest, on_event=_make_llm_event_callback(ev_ph))
+            ev_ph.empty()
             for fc in index.get("file_classifications", []):
                 st.write(f"• `{fc['path']}` → **{fc['category']}** ({fc.get('confidence', 0):.0%})")
             idx_status.update(
@@ -453,7 +504,9 @@ def _run_pipeline_inline(case_dir: Path, lg: str) -> None:
     disp_label = "📋 Planning specialist dispatch…" if lg == "en" else "📋 正在规划专科调度…"
     with st.status(disp_label, expanded=True) as disp_status:
         try:
-            dispatch = coordinator.run_dispatch(index)
+            ev_ph = st.empty()
+            dispatch = coordinator.run_dispatch(index, on_event=_make_llm_event_callback(ev_ph))
+            ev_ph.empty()
             specs = dispatch.get("specialists_required", [])
             st.write(f"{'Dispatching' if lg == 'en' else '调度'} {len(specs)} {'specialist(s)' if lg == 'en' else '个专科'}:")
             for sp in specs:
@@ -492,14 +545,50 @@ def _run_pipeline_inline(case_dir: Path, lg: str) -> None:
 
     # ── Step 4: Parallel consultation ─────────────────────────────────────
     consult_label = "👥 Running parallel specialist consultations…" if lg == "en" else "👥 并行专科会诊进行中…"
+    specs_dispatched = dispatch.get("specialists_required", [])
+
+    # Pre-create opinion slots OUTSIDE the status block so they persist during
+    # synthesis and after the run completes (elements inside st.status collapse
+    # when the status widget finishes).
+    opinions_hdr_ph = st.empty()   # "### 专科会诊意见" header — shown on first completion
+    opinion_slots: dict = {sp["name"]: st.empty() for sp in specs_dispatched}
+
     with st.status(consult_label, expanded=True) as consult_status:
         try:
             pool = SpecialistPool(bus, config_path=config_path, prompts_dir=prompts_dir, lang=lg)
-            opinions = pool.run_parallel(dispatch)
-            st.write(f"{len(opinions)} {'specialist opinion(s) received' if lg == 'en' else '份专科意见已收到'}")
-            for name, opinion in opinions.items():
-                with st.expander(f"📋 {name}"):
-                    st.markdown(opinion[:600] + ("\n\n*…(truncated)*" if len(opinion) > 600 else ""))
+            # Progress rows (⏳→✅/❌) live inside the status widget only
+            specialist_rows: dict = {}
+            for sp in specs_dispatched:
+                row = st.empty()
+                row.caption(f"⏳ {sp['name']} — {'waiting…' if lg == 'en' else '等待中…'}")
+                specialist_rows[sp["name"]] = row
+
+            def _on_done(name: str, success: bool, error: str | None, opinion_text: str | None) -> None:
+                # 1. Update progress indicator inside the status widget
+                ph = specialist_rows.get(name)
+                if ph is not None:
+                    if success:
+                        ph.caption(f"✅ {name} — {'done' if lg == 'en' else '完成'}")
+                    else:
+                        ph.caption(f"❌ {name} — {'failed' if lg == 'en' else '失败'}: {error}")
+
+                # 2. Progressively render this opinion into its pre-created slot
+                #    (outside the status block — stays visible during synthesis)
+                slot = opinion_slots.get(name)
+                if slot is not None and success:
+                    # Show the section header on the first opinion that lands
+                    opinions_hdr_ph.markdown(
+                        "### Specialist Opinions" if lg == "en" else "### 专科会诊意见"
+                    )
+                    html_path = bus.opinions_dir / f"{name}.html"
+                    with slot.container():
+                        with st.expander(f"✅ {name}", expanded=False):
+                            if html_path.exists():
+                                st.html(html_path.read_text(encoding="utf-8"))
+                            else:
+                                st.markdown(opinion_text or "")
+
+            opinions = pool.run_parallel(dispatch, on_specialist_done=_on_done)
             consult_status.update(
                 label=f"✅ {_('step_consult', lg)} ({len(opinions)}) " + ("complete" if lg == "en" else "完成"),
                 state="complete",
@@ -517,7 +606,9 @@ def _run_pipeline_inline(case_dir: Path, lg: str) -> None:
     synth_label = "📝 Generating MDT report…" if lg == "en" else "📝 正在生成 MDT 综合报告…"
     with st.status(synth_label, expanded=True) as synth_status:
         try:
-            report_text = coordinator.run_synthesis(index, opinions)
+            ev_ph = st.empty()
+            report_text = coordinator.run_synthesis(index, opinions, on_event=_make_llm_event_callback(ev_ph))
+            ev_ph.empty()
             synth_status.update(
                 label=f"✅ {_('step_report', lg)} " + ("complete" if lg == "en" else "完成"),
                 state="complete",
@@ -533,23 +624,19 @@ def _run_pipeline_inline(case_dir: Path, lg: str) -> None:
     st.divider()
 
     st.subheader(_("report_title", lg))
-    _display_report_with_media(report_text, case_dir, lg)
+    # Re-use the HTML already saved by coordinator (has Mermaid SVGs from Kroki)
+    report_html = bus.report_path.read_text(encoding="utf-8")
+    _display_report_with_media(report_html, case_dir, lg)
 
     st.divider()
-    col_md, col_html, col_pdf = st.columns(3)
-    col_md.download_button(
-        _("dl_md", lg),
-        data=report_text.encode("utf-8"),
-        file_name="mdt_report.md",
-        mime="text/markdown",
-    )
+    col_html, col_pdf = st.columns(2)
     col_html.download_button(
         _("dl_html", lg),
-        data=_report_to_html(report_text).encode("utf-8"),
+        data=report_html.encode("utf-8"),
         file_name="mdt_report.html",
         mime="text/html",
     )
-    pdf_bytes = _report_to_pdf(report_text)
+    pdf_bytes = _report_to_pdf(report_html)
     if pdf_bytes:
         col_pdf.download_button(
             _("dl_pdf", lg),
@@ -696,14 +783,14 @@ with tab_debug:
             with st.expander("💬 03_opinions — " + ("Specialist Opinions" if lang == "en" else "各专科会诊意见")):
                 opinions_dir = ws_dir / _WS_OPINIONS
                 if opinions_dir.is_dir():
-                    op_files = sorted(opinions_dir.glob("*.md"))
+                    op_files = sorted(opinions_dir.glob("*.html"))
                     if op_files:
                         op_dict = {f.stem: f.read_text(encoding="utf-8") for f in op_files}
                         dispatch_data = _read_workspace_json(ws_dir, _WS_DISPATCH) or {}
                         _render_agents_diagram(dispatch_data, op_dict, lang)
                         for op_file in op_files:
                             with st.expander(f"📋 {op_file.stem}"):
-                                st.markdown(op_file.read_text(encoding="utf-8"))
+                                st.iframe(op_file.read_text(encoding="utf-8"), height=500)
                     else:
                         st.info("Not generated yet." if lang == "en" else "尚未生成")
                 else:
@@ -716,16 +803,15 @@ with tab_debug:
                 else:
                     st.info("Not generated (enable_debate=false)." if lang == "en" else "尚未生成（enable_debate=false）")
 
-            with st.expander("📋 05_mdt_report.md"):
+            with st.expander("📋 05_mdt_report.html"):
                 report = _read_workspace_text(ws_dir, _WS_REPORT)
                 if report:
                     _display_report_with_media(report, debug_case_dir, lang)
-                    c1, c2, c3 = st.columns(3)
-                    c1.download_button(_("dl_md", lang), report.encode(), "mdt_report.md", "text/markdown", key="dbg_dl_md")
-                    c2.download_button(_("dl_html", lang), _report_to_html(report).encode(), "mdt_report.html", "text/html", key="dbg_dl_html")
+                    c1, c2 = st.columns(2)
+                    c1.download_button(_("dl_html", lang), report.encode(), "mdt_report.html", "text/html", key="dbg_dl_html")
                     pdf = _report_to_pdf(report)
                     if pdf:
-                        c3.download_button(_("dl_pdf", lang), pdf, "mdt_report.pdf", "application/pdf", key="dbg_dl_pdf")
+                        c2.download_button(_("dl_pdf", lang), pdf, "mdt_report.pdf", "application/pdf", key="dbg_dl_pdf")
                 else:
                     st.info("Not generated yet." if lang == "en" else "尚未生成")
 

@@ -51,10 +51,9 @@ def main() -> None:
     extractor.extract_all(file_paths, progress_cb=lambda msg: print(f"  {msg}"))
     print("[Main] Context extraction complete.")
 
-    # ── Rounds 1–2: Coordinator index + dispatch ───────────────────────
+    # ── Rounds 1–2: Coordinator index + dispatch (single LLM call) ────
     coordinator = Coordinator(bus, config_path=config_path, prompts_dir=prompts_dir)
-    index = coordinator.run_index(manifest)
-    dispatch = coordinator.run_dispatch(index)
+    index, dispatch = coordinator.run_index_and_dispatch(manifest)
 
     # ── Build per-agent workspaces (deterministic, after dispatch) ─────
     print("[Main] Building agent workspaces…")

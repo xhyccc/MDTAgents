@@ -2,8 +2,12 @@ ui:
   language: zh   # zh = Chinese prompts/UI | en = English prompts/UI
 
 opencode:
+  backend: mini_agent        # agent backend: opencode | mini_agent (overridden by AGENT_BACKEND in .env)
   max_workers: 2
   max_rounds: 5
+  coordinator_timeout: 300   # seconds for index / dispatch rounds
+  synthesis_timeout: 1800     # seconds for synthesis round (longer — generates full report)
+  coordinator_retries: 3     # retry attempts if a coordinator round times out or gets a 400
   timeout: 600
   specialist_timeout: 1800  # 30 minutes per specialist agent
   fallback_timeout: 600    # 10 minutes for text-only fallback when specialist times out

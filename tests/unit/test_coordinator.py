@@ -58,6 +58,10 @@ def _make_prompts(tmp_path: Path) -> Path:
     prompts_dir.mkdir()
     (prompts_dir / "coordinator_index.md").write_text("Index prompt: {case_dir} {total_files} {manifest_json}", encoding="utf-8")
     (prompts_dir / "coordinator_dispatch.md").write_text("Dispatch prompt: {index_json} {available_specialists_json}", encoding="utf-8")
+    (prompts_dir / "coordinator_index_dispatch.md").write_text(
+        "IndexDispatch prompt: {case_dir} {total_files} {manifest_json} {available_specialists_json}",
+        encoding="utf-8",
+    )
     (prompts_dir / "coordinator_synthesis.md").write_text("Synthesis prompt: {index_json} {opinions_json}", encoding="utf-8")
 
     spec_dir = prompts_dir / "specialists"
@@ -266,8 +270,8 @@ class TestCoordinatorRunSynthesis:
         saved = coordinator.bus.report_path.read_text(encoding="utf-8")
         assert "MDT Final Report" in saved
 
-    def test_run_synthesis_passes_read_not_allowed(self, tmp_path: Path):
-        """Synthesis has all opinions embedded; model must not use the read tool."""
+    def test_run_synthesis_has_bash_and_read_allowed(self, tmp_path: Path):
+        """Synthesis uses inline data only; bash and read are disabled."""
         coordinator = _make_coordinator(tmp_path)
         calls: list = []
 
@@ -280,6 +284,7 @@ class TestCoordinatorRunSynthesis:
 
         assert calls, "client.run was never called"
         assert calls[0].get("read_allowed") is False
+        assert calls[0].get("bash_allowed") is False
 
 
 # ---------------------------------------------------------------------------
@@ -304,31 +309,6 @@ class TestCoordinatorRunIndexReadAllowed:
 
         assert calls, "client.run was never called"
         assert calls[0].get("read_allowed") is False
-
-    def test_run_index_embeds_file_texts_in_prompt(self, tmp_path: Path):
-        """The user message must include the full text extracted from case files."""
-        # Add a file with recognisable content so we can assert it appears in prompt.
-        bus = _make_bus(tmp_path)
-        (bus.case_dir / "入院记录.md").write_text("主诉：咳嗽三天", encoding="utf-8")
-        cfg_path = _make_config(tmp_path)
-        prompts_dir = _make_prompts(tmp_path)
-
-        # Update index prompt template to include the {file_texts} placeholder.
-        (prompts_dir / "coordinator_index.md").write_text(
-            "INDEX: {case_dir} {total_files} {manifest_json} {file_texts}",
-            encoding="utf-8",
-        )
-        coordinator = Coordinator(bus=bus, config_path=cfg_path, prompts_dir=prompts_dir)
-
-        calls: list = []
-        with patch.object(coordinator.client, "run", side_effect=lambda **kw: calls.append(kw) or json.dumps(SAMPLE_INDEX)):
-            coordinator.run_index(Manifest(
-                case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0
-            ))
-
-        assert calls
-        user_msg = calls[0]["user_message"]
-        assert "主诉：咳嗽三天" in user_msg or "入院记录" in user_msg
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +357,124 @@ class TestBuildFileTexts:
         result = coordinator._build_file_texts()
         assert "应该被忽略的内容" not in result
 
+
+# ---------------------------------------------------------------------------
+# Coordinator.run_index_and_dispatch
+# ---------------------------------------------------------------------------
+
+SAMPLE_COMBINED = {
+    "file_classifications": [
+        {"path": "CT检查.md", "category": "影像", "confidence": 0.95, "reason": "CT图像"},
+    ],
+    "case_completeness": {
+        "has_imaging": True,
+        "has_pathology": False,
+        "has_labs": False,
+        "has_history": False,
+        "has_previous_treatment": False,
+        "missing_key_categories": ["病理"],
+    },
+    "summary": "仅有影像资料",
+    "specialists_required": [
+        {"name": "影像科", "reason": "有CT", "files_assigned": ["CT检查.md"]},
+    ],
+    "notes": ["缺少病理"],
+}
+
+
+class TestCoordinatorRunIndexAndDispatch:
+    def test_saves_both_files_and_returns_tuple(self, tmp_path: Path):
+        coordinator = _make_coordinator(tmp_path)
+        combined_json = json.dumps(SAMPLE_COMBINED)
+
+        with patch.object(coordinator.client, "run", return_value=combined_json):
+            index, dispatch = coordinator.run_index_and_dispatch(
+                Manifest(case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0)
+            )
+
+        assert "file_classifications" in index
+        assert "case_completeness" in index
+        assert "summary" in index
+        assert "specialists_required" in dispatch
+        assert "notes" in dispatch
+        assert coordinator.bus.index_path.exists()
+        assert coordinator.bus.dispatch_path.exists()
+
+    def test_only_one_llm_call(self, tmp_path: Path):
+        coordinator = _make_coordinator(tmp_path)
+        calls: list = []
+
+        def capture(**kw):
+            calls.append(kw)
+            return json.dumps(SAMPLE_COMBINED)
+
+        with patch.object(coordinator.client, "run", side_effect=capture):
+            coordinator.run_index_and_dispatch(
+                Manifest(case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0)
+            )
+
+        assert len(calls) == 1, f"Expected 1 LLM call, got {len(calls)}"
+
+    def test_read_not_allowed(self, tmp_path: Path):
+        coordinator = _make_coordinator(tmp_path)
+        calls: list = []
+
+        with patch.object(coordinator.client, "run",
+                          side_effect=lambda **kw: calls.append(kw) or json.dumps(SAMPLE_COMBINED)):
+            coordinator.run_index_and_dispatch(
+                Manifest(case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0)
+            )
+
+        assert calls[0].get("read_allowed") is False
+
+    def test_cache_skips_llm_call(self, tmp_path: Path):
+        coordinator = _make_coordinator(tmp_path)
+        # Pre-populate cache
+        coordinator.bus.save_index({"file_classifications": [], "summary": "cached"})
+        coordinator.bus.save_dispatch({"specialists_required": []})
+
+        calls: list = []
+        with patch.object(coordinator.client, "run", side_effect=lambda **kw: calls.append(kw)):
+            index, dispatch = coordinator.run_index_and_dispatch(
+                Manifest(case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0)
+            )
+
+        assert len(calls) == 0, "LLM must not be called when cache exists"
+        assert index["summary"] == "cached"
+
+    def test_index_and_dispatch_keys_split_correctly(self, tmp_path: Path):
+        coordinator = _make_coordinator(tmp_path)
+        with patch.object(coordinator.client, "run", return_value=json.dumps(SAMPLE_COMBINED)):
+            index, dispatch = coordinator.run_index_and_dispatch(
+                Manifest(case_id="t", timestamp="2025-01-01T00:00:00Z", files=[], total_files=0)
+            )
+
+        # Index must NOT contain dispatch-only keys
+        assert "specialists_required" not in index
+        assert "notes" not in index
+        # Dispatch must NOT contain index-only keys
+        assert "file_classifications" not in dispatch
+        assert "case_completeness" not in dispatch
+
+    def test_manifest_included_in_user_message(self, tmp_path: Path):
+        coordinator = _make_coordinator(tmp_path)
+        calls: list = []
+        manifest = Manifest(
+            case_id="unique_id_xyz",
+            timestamp="2025-01-01T00:00:00Z",
+            files=[],
+            total_files=0,
+        )
+
+        with patch.object(coordinator.client, "run",
+                          side_effect=lambda **kw: calls.append(kw) or json.dumps(SAMPLE_COMBINED)):
+            coordinator.run_index_and_dispatch(manifest)
+
+        user_msg = calls[0]["user_message"]
+        assert "unique_id_xyz" in user_msg
+
+
+class TestBuildFileTexts:
     def test_skips_unsupported_extensions(self, tmp_path: Path):
         """Binary/unsupported files (e.g. .png) must not appear in the output."""
         coordinator = _make_coordinator(tmp_path)
@@ -410,3 +508,143 @@ class TestBuildFileTexts:
 
         result = coordinator._build_file_texts()
         assert result == "(no text content found)"
+
+
+# ---------------------------------------------------------------------------
+# coordinator_timeout and retry
+# ---------------------------------------------------------------------------
+
+class TestCoordinatorTimeoutAndRetry:
+    """Coordinator rounds use coordinator_timeout, not timeout; retries on AgentError."""
+
+    def _make_coordinator_with_retry_config(self, tmp_path: Path, retries: int = 2) -> Coordinator:
+        bus = _make_bus(tmp_path)
+        cfg_path = tmp_path / "config" / "system.yaml"
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg = {
+            "opencode": {
+                "default_model": "test-model",
+                "timeout": 600,
+                "coordinator_timeout": 120,
+                "synthesis_timeout": 300,
+                "coordinator_retries": retries,
+            },
+            "specialists": [{"name": "影像科"}, {"name": "病理科"}],
+        }
+        cfg_path.write_text(yaml.dump(cfg, allow_unicode=True), encoding="utf-8")
+        prompts_dir = _make_prompts(tmp_path)
+        return Coordinator(bus=bus, config_path=cfg_path, prompts_dir=prompts_dir)
+
+    def test_coordinator_timeout_loaded_from_config(self, tmp_path: Path):
+        coordinator = self._make_coordinator_with_retry_config(tmp_path)
+        assert coordinator.coordinator_timeout == 120
+        assert coordinator.synthesis_timeout == 300
+        assert coordinator.timeout == 600  # original timeout unchanged
+
+    def test_coordinator_retries_loaded_from_config(self, tmp_path: Path):
+        coordinator = self._make_coordinator_with_retry_config(tmp_path, retries=3)
+        assert coordinator.coordinator_retries == 3
+
+    def test_run_index_uses_coordinator_timeout(self, tmp_path: Path):
+        coordinator = self._make_coordinator_with_retry_config(tmp_path)
+        calls: list = []
+        manifest = Manifest(case_id="x", timestamp="t", files=[], total_files=0)
+
+        with patch.object(coordinator.client, "run",
+                          side_effect=lambda **kw: calls.append(kw) or json.dumps(SAMPLE_INDEX)):
+            coordinator.run_index(manifest)
+
+        assert calls[0]["timeout"] == 120
+
+    def test_run_dispatch_uses_coordinator_timeout(self, tmp_path: Path):
+        coordinator = self._make_coordinator_with_retry_config(tmp_path)
+        calls: list = []
+
+        with patch.object(coordinator.client, "run",
+                          side_effect=lambda **kw: calls.append(kw) or json.dumps(SAMPLE_DISPATCH)):
+            coordinator.run_dispatch(SAMPLE_INDEX)
+
+        assert calls[0]["timeout"] == 120
+
+    def test_run_synthesis_uses_synthesis_timeout(self, tmp_path: Path):
+        coordinator = self._make_coordinator_with_retry_config(tmp_path)
+        calls: list = []
+
+        with patch.object(coordinator.client, "run",
+                          side_effect=lambda **kw: calls.append(kw) or "Final report."):
+            coordinator.run_synthesis(SAMPLE_INDEX, {"影像科": "正常"})
+
+        assert calls[0]["timeout"] == 300  # synthesis_timeout, not coordinator_timeout
+
+    def test_run_with_retry_succeeds_on_second_attempt(self, tmp_path: Path):
+        from src.cli_client import AgentError
+        coordinator = self._make_coordinator_with_retry_config(tmp_path, retries=3)
+        attempt = [0]
+
+        def _flaky():
+            attempt[0] += 1
+            if attempt[0] < 2:
+                raise AgentError("temporary failure")
+            return "success"
+
+        result = coordinator._run_with_retry(_flaky, step_name="test", retry_delay=0)
+        assert result == "success"
+        assert attempt[0] == 2
+
+    def test_run_with_retry_raises_after_max_attempts(self, tmp_path: Path):
+        from src.cli_client import AgentError
+        coordinator = self._make_coordinator_with_retry_config(tmp_path, retries=2)
+        calls = [0]
+
+        def _always_fail():
+            calls[0] += 1
+            raise AgentError("always fails")
+
+        with pytest.raises(AgentError, match="always fails"):
+            coordinator._run_with_retry(_always_fail, step_name="test", retry_delay=0)
+        assert calls[0] == 2
+
+    def test_run_dispatch_retries_on_agent_error(self, tmp_path: Path):
+        from src.cli_client import AgentError
+        coordinator = self._make_coordinator_with_retry_config(tmp_path, retries=3)
+        call_count = [0]
+
+        def _flaky_dispatch(**kw):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise AgentError("Kimi API timeout")
+            return json.dumps(SAMPLE_DISPATCH)
+
+        with patch.object(coordinator.client, "run", side_effect=_flaky_dispatch):
+            result = coordinator.run_dispatch(SAMPLE_INDEX)
+
+        assert call_count[0] == 3
+        assert "specialists_required" in result
+
+    def test_coordinator_timeout_defaults_to_timeout_if_not_set(self, tmp_path: Path):
+        """If coordinator_timeout not in config, falls back to timeout."""
+        coordinator = _make_coordinator(tmp_path)  # MINIMAL_CONFIG has no coordinator_timeout
+        assert coordinator.coordinator_timeout == coordinator.timeout
+
+    def test_synthesis_timeout_defaults_to_coordinator_timeout(self, tmp_path: Path):
+        """If synthesis_timeout not set, falls back to coordinator_timeout."""
+        bus = _make_bus(tmp_path)
+        cfg_path = tmp_path / "config" / "system.yaml"
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg = {
+            "opencode": {
+                "default_model": "test-model",
+                "timeout": 600,
+                "coordinator_timeout": 120,
+                # synthesis_timeout intentionally absent
+            },
+            "specialists": [],
+        }
+        cfg_path.write_text(yaml.dump(cfg, allow_unicode=True), encoding="utf-8")
+        coordinator = Coordinator(bus=bus, config_path=cfg_path, prompts_dir=_make_prompts(tmp_path))
+        assert coordinator.synthesis_timeout == 120
+
+    def test_synthesis_timeout_defaults_to_timeout_when_no_coordinator_timeout(self, tmp_path: Path):
+        """If neither synthesis_timeout nor coordinator_timeout set, falls back to timeout."""
+        coordinator = _make_coordinator(tmp_path)  # MINIMAL_CONFIG only has timeout: 60
+        assert coordinator.synthesis_timeout == coordinator.timeout

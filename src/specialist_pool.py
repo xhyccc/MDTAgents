@@ -10,12 +10,12 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
-from src.cli_client import AgentError, OpenCodeClient
-from src.file_bus import FileBus
+from src.cli_client import AgentError, OpenCodeClient, make_agent_client
+from src.file_bus import FileBus, _md_to_html
 
 
 # ---------------------------------------------------------------------------
@@ -25,30 +25,25 @@ from src.file_bus import FileBus
 SPECIALIST_USER_TEMPLATE = """\
 你是 {specialist_name} 专家，请出具《{specialist_name}会诊意见》。
 
-你的工作区
-{workspace_path}
+以下是你全部的文字资料（已完整提取），请先基于这些内容进行分析：
 
-文件清单
-{file_listing}
+{file_texts}
 
-工作区说明
-每份原始文件（PDF/Word等）都有一个同名的 <stem>_<ext>/ 展开文件夹，内含：
-  · <stem>.txt       完整提取文本  ← 优先通过 read 工具读取此文件
-  · page_NNN.png     逐页截图（若已生成）
-  · image_NNN.png    内嵌图片（若已提取）
-文本文件（.md/.txt/.csv/.json）可直接 read。
+可用图像文件
+{image_list}
 
-推理轮次（最多 {max_rounds} 轮）
-你可以进行最多 {max_rounds} 轮推理。每轮可读取文件、审查证据或修正结论。
-第 {max_rounds} 轮结束后，你必须输出最终会诊意见。若提前确定结论，可直接输出，无需耗尽所有轮次。
+图像使用说明
+· 通常情况下，上方文字资料已足够做出判断，无需查阅图像
+· 如确有必要查阅图像（例如需观察影像特征、病理图像细节），请在**一次工具调用**中读取所有你认为必要的图像，不要逐张分批读取
+· 不要用 read 工具读取文字文件（.txt/.md），其内容已完整嵌入上方
 
 纪律
-1. 必须基于你实际阅读到的资料内容做判断，不要编造
+1. 必须基于以上提供的资料内容做判断，不要编造
 2. 如果资料不足以做出明确判断，请明确说明"资料不足：缺少xxx"
 3. 不要越界给出其他专科的治疗建议
 4. 输出格式：
    - {specialist_name}会诊意见
-   - 一、资料概述（简述你读了什么）
+   - 一、资料概述（简述你审阅的资料）
    - 二、专科分析
    - 三、初步结论
    - 四、需要补充的资料（如有）
@@ -57,30 +52,26 @@ SPECIALIST_USER_TEMPLATE = """\
 SPECIALIST_USER_TEMPLATE_EN = """\
 You are a {specialist_name} specialist. Please provide your consultation opinion.
 
-Your workspace
-{workspace_path}
+All your text materials are embedded below (fully extracted). Start your analysis from these:
 
-File listing
-{file_listing}
+{file_texts}
 
-Workspace layout
-Each original binary file (PDF/Word/etc.) has a sibling folder named <stem>_<ext>/ containing:
-  · <stem>.txt       full extracted text  ← read this first via the read tool
-  · page_NNN.png     per-page screenshots (if rendered)
-  · image_NNN.png    embedded raster images (if extracted)
-Plain-text files (.md/.txt/.csv/.json) can be read directly.
+Available image files
+{image_list}
 
-Reasoning rounds (max {max_rounds})
-You may perform up to {max_rounds} reasoning rounds. Each round may read files, review evidence, or revise conclusions.
-After round {max_rounds} you must output your final consultation opinion. If you reach a conclusion earlier, output it immediately.
+Image usage
+· In most cases the text materials above are sufficient — you do not need to view images
+· If you do need to examine images (e.g., to observe imaging features or pathology slide details),
+  read ALL necessary images in a SINGLE tool call — do not read them one at a time
+· Do not use the read tool on text files (.txt/.md); their content is already embedded above
 
 Discipline
-1. Base all judgments on the materials you have actually read — do not fabricate
+1. Base all judgments on the materials provided above — do not fabricate
 2. If the data is insufficient for a clear judgment, explicitly state "Insufficient data: missing xxx"
 3. Do not exceed your specialty's scope to make treatment recommendations for other specialties
 4. Output format:
    - {specialist_name} Consultation Opinion
-   - I. Data Overview (briefly describe what you read)
+   - I. Data Overview (briefly describe what you reviewed)
    - II. Specialty Analysis
    - III. Preliminary Conclusions
    - IV. Additional Data Required (if any)
@@ -163,19 +154,23 @@ class SpecialistPool:
         self.specialist_timeout: int = oc_cfg.get("specialist_timeout", 1800)
         self.fallback_timeout: int = oc_cfg.get("fallback_timeout", 300)
         self.max_workers: int = oc_cfg.get("max_workers", 5)
-        self.max_rounds: int = oc_cfg.get("max_rounds", 5)
         self.lang: str = lang or cfg.get("ui", {}).get("language", "zh")
 
-        self.client = OpenCodeClient(
+        self.client = make_agent_client(
+            cfg=oc_cfg,
             error_log_dir=bus.errors_dir,
-            default_model=self.default_model,
+            log_dir=bus.logs_dir,
         )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def run_parallel(self, dispatch: Dict[str, Any]) -> Dict[str, str]:
+    def run_parallel(
+        self,
+        dispatch: Dict[str, Any],
+        on_specialist_done: Optional[Callable[[str, bool, Optional[str]], None]] = None,
+    ) -> Dict[str, str]:
         """
         Execute all specialists from the dispatch plan in parallel.
 
@@ -183,6 +178,15 @@ class SpecialistPool:
         ----------
         dispatch:
             The parsed 02_dispatch.json dict containing ``specialists_required``.
+        on_specialist_done:
+            Optional callback invoked in the *calling thread* (via ``as_completed``)
+            each time a specialist finishes.  Signature::
+
+                on_specialist_done(name: str, success: bool, error: str | None, opinion_text: str | None)
+
+            ``opinion_text`` is the raw markdown opinion on success, ``None`` on failure.
+            This is safe to use for Streamlit UI updates because ``as_completed``
+            runs in the thread that called ``run_parallel()``.
 
         Returns
         -------
@@ -208,12 +212,27 @@ class SpecialistPool:
                     opinion_text = future.result()
                     opinions[name] = opinion_text
                     print(f"[SpecialistPool] {name}: opinion received ✓")
+                    if on_specialist_done:
+                        try:
+                            on_specialist_done(name, True, None, opinion_text)
+                        except Exception:  # noqa: BLE001
+                            pass
                 except AgentError as exc:
                     errors[name] = str(exc)
                     print(f"[SpecialistPool] {name}: FAILED — {exc}")
+                    if on_specialist_done:
+                        try:
+                            on_specialist_done(name, False, str(exc), None)
+                        except Exception:  # noqa: BLE001
+                            pass
                 except Exception as exc:  # noqa: BLE001
                     errors[name] = str(exc)
                     print(f"[SpecialistPool] {name}: unexpected error — {exc}")
+                    if on_specialist_done:
+                        try:
+                            on_specialist_done(name, False, str(exc), None)
+                        except Exception:  # noqa: BLE001
+                            pass
 
         if errors:
             print(f"[SpecialistPool] {len(errors)} specialist(s) failed: {list(errors.keys())}")
@@ -229,11 +248,16 @@ class SpecialistPool:
         files_assigned: List[str] = spec.get("files_assigned", [])
         model: Optional[str] = self.default_model
 
-        # Skip if opinion already written (allows partial reruns without re-calling LLM)
-        existing_opinion_path = self.bus.opinions_dir / f"{name}.md"
-        if existing_opinion_path.exists():
+        # Skip if opinion already written (allows partial reruns without re-calling LLM).
+        # Prefer the markdown file (used by synthesis); fall back to the HTML file.
+        existing_md_path = self.bus.opinions_dir / f"{name}.md"
+        existing_html_path = self.bus.opinions_dir / f"{name}.html"
+        if existing_md_path.exists():
             print(f"[SpecialistPool] {name}: opinion loaded from cache ✓")
-            return existing_opinion_path.read_text(encoding="utf-8")
+            return existing_md_path.read_text(encoding="utf-8")
+        if existing_html_path.exists():
+            print(f"[SpecialistPool] {name}: opinion loaded from cache (html) ✓")
+            return existing_html_path.read_text(encoding="utf-8")
 
         system_prompt = self._build_system_prompt(name)
 
@@ -246,28 +270,21 @@ class SpecialistPool:
 
         user_message = self._build_user_message(name, workspace)
 
-        # Collect image files from workspace for vision (--file attachments).
-        # Include: original image files + embedded images from context subfolders.
-        # Exclude: page screenshots (too many; text covers the same content).
-        image_suffixes = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
-        image_paths: List[Path] = []
-        if workspace.exists():
-            for item in sorted(workspace.iterdir()):
-                if item.is_file() and item.suffix.lower() in image_suffixes:
-                    image_paths.append(item)
-                elif item.is_dir():
-                    for sub in sorted(item.iterdir()):
-                        if sub.is_file() and sub.name.startswith("image_") and sub.suffix.lower() in image_suffixes:
-                            image_paths.append(sub)
+        # Images remain in the workspace; the agent reads them on demand via
+        # the read tool per the prompt instruction (one batched call if needed).
+        # Do NOT pre-attach them as --file: that forces all images into the
+        # initial context window regardless of whether they're needed.
 
         try:
             opinion_text = self.client.run(
                 agent_name=f"specialist_{name}",
                 system_prompt=system_prompt,
                 user_message=user_message,
-                file_paths=image_paths,
+                file_paths=[],         # images stay in workspace; agent pulls on demand
                 model=model,
                 timeout=self.specialist_timeout,
+                read_allowed=True,     # agent may read images from workspace when needed
+                bash_allowed=True,     # allow bash for calculations if needed
             )
         except AgentError as exc:
             if "timed out" in str(exc).lower():
@@ -275,7 +292,8 @@ class SpecialistPool:
                 return self._run_specialist_fallback(spec)
             raise
 
-        self.bus.save_opinion(name, opinion_text)
+        self.bus.save_opinion_md(name, opinion_text)
+        self.bus.save_opinion(name, _md_to_html(opinion_text, title=f"{name} 会诊意见"))
         return opinion_text
 
     def _run_specialist_fallback(self, spec: Dict[str, Any]) -> str:
@@ -316,7 +334,8 @@ class SpecialistPool:
         )
         opinion_text = opinion_text + note
 
-        self.bus.save_opinion(name, opinion_text)
+        self.bus.save_opinion_md(name, opinion_text)
+        self.bus.save_opinion(name, _md_to_html(opinion_text, title=f"{name} 会诊意见"))
         return opinion_text
 
     def _collect_text_for_fallback(self, workspace: Path) -> str:
@@ -374,24 +393,36 @@ class SpecialistPool:
 
     def _build_user_message(self, specialist_name: str, workspace_path: Path) -> str:
         template = SPECIALIST_USER_TEMPLATE_EN if self.lang == "en" else SPECIALIST_USER_TEMPLATE
-
-        # Build an indented file listing of the workspace for the agent.
-        lines: List[str] = []
-        if workspace_path.exists():
-            for item in sorted(workspace_path.iterdir()):
-                if item.is_file():
-                    lines.append(f"  {item.name}")
-                elif item.is_dir():
-                    lines.append(f"  {item.name}/")
-                    for sub in sorted(item.iterdir()):
-                        lines.append(f"    └─ {sub.name}")
-
+        file_texts = self._collect_text_for_fallback(workspace_path)
+        image_list = self._list_image_files(workspace_path)
         return template.format(
             specialist_name=specialist_name,
-            workspace_path=str(workspace_path),
-            file_listing="\n".join(lines) if lines else "  (empty)",
-            max_rounds=self.max_rounds,
+            file_texts=file_texts,
+            image_list=image_list,
         )
+
+    def _list_image_files(self, workspace_path: Path) -> str:
+        """Return a formatted list of image files available in the workspace.
+
+        Includes both extracted embedded images (image_NNN.png) and page
+        screenshots (page_NNN.png) from context subfolders, as well as any
+        top-level image files. Agents can read these on demand.
+        """
+        image_suffixes = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+        lines: List[str] = []
+
+        if not workspace_path.exists():
+            return "  (no images available)"
+
+        for item in sorted(workspace_path.iterdir()):
+            if item.is_file() and item.suffix.lower() in image_suffixes:
+                lines.append(f"  {item.name}")
+            elif item.is_dir():
+                for sub in sorted(item.iterdir()):
+                    if sub.is_file() and sub.suffix.lower() in image_suffixes:
+                        lines.append(f"  {item.name}/{sub.name}")
+
+        return "\n".join(lines) if lines else "  (no images available)"
 
     def _write_context_files(self, name: str, file_paths: List[Path]) -> List[tuple]:
         """Legacy: superseded by ContextExtractor + FileBus.build_agent_workspaces.

@@ -166,7 +166,10 @@ def _make_fake_opencode(bin_dir: Path, responses: list[str]) -> Path:
                 print("opencode 0.0.0-fake")
                 sys.exit(0)
 
-            print(response)
+            # Emit the response as a JSONL text event so OpenCodeClient._extract_text()
+            # can parse it correctly (it expects opencode's --format json event stream).
+            event = {{"type": "text", "part": {{"text": response}}}}
+            print(json.dumps(event, ensure_ascii=False))
         """),
         encoding="utf-8",
     )
@@ -214,7 +217,13 @@ class TestFullPipeline:
         _make_fake_opencode(bin_dir, responses)
         new_path = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
 
-        with patch.dict(os.environ, {"PATH": new_path}):
+        with patch.dict(os.environ, {
+            "PATH": new_path,
+            # Force opencode backend so the fake opencode binary is used.
+            # Block .env auto-discovery to prevent real .env from overriding.
+            "AGENT_BACKEND": "opencode",
+            "MDT_ENV_FILE": "/nonexistent/.env",
+        }):
             coordinator = Coordinator(bus=bus, config_path=cfg_path, prompts_dir=prompts_dir)
             index = coordinator.run_index(manifest)
             dispatch = coordinator.run_dispatch(index)
