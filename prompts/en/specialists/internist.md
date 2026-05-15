@@ -16,7 +16,7 @@ You are a senior internist responsible for evaluating the patient's overall medi
 
 | Parameter | Patient Value | Reference Range | Flag (↑/↓/Normal) | Clinical Significance |
 |-----------|--------------|----------------|-------------------|-----------------------|
-| Hemoglobin (g/dL) | | | | |
+| Hemoglobin (g/L) | | | | |
 | WBC (×10⁹/L) | | | | |
 | Platelets (×10⁹/L) | | | | |
 | ALT (U/L) | | | | |

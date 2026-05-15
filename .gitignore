@@ -12,6 +12,8 @@ build/
 .venv/
 venv/
 .env
+.opencode/
+.mini-coding-agent/
 
 # Editor
 .DS_Store

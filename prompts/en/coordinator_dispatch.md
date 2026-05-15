@@ -10,8 +10,9 @@ Available specialties (from system config):
 Tasks
 1. Based on data completeness and clinical questions, select the required specialists from the available list
 2. Assign the files each specialist should review (based on category from the index)
-3. If a data category exists but has no matching specialty, flag it in notes as "specialist required manually"
-4. If a specialty's relevant data is missing but clinically needed, assign general records for overall assessment
+3. You may only select specialties from the "Available specialties" list above. Do not output any specialty name not on that list (including "manually assign specialist" or any invented name)
+4. If a data category has no matching specialty in the list, silently ignore it — do not mention it in the output
+5. If a specialty's relevant data is missing but clinically needed, assign general records (e.g., history) for overall assessment
 
 Output format (strict JSON, no Markdown code fences)
 {
